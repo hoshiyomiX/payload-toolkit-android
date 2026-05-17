@@ -47,7 +47,7 @@ jobs:
 
       - name: Build debug APK
         working-directory: android
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug --stacktrace 2>&1
 
       - name: List build outputs
         if: always()
@@ -116,7 +116,7 @@ jobs:
             -PciKeystorePass=ci-store-pass \
             -PciKeyAlias=ci-key \
             -PciKeyPass=ci-key-pass \
-            --stacktrace
+            --stacktrace 2>&1
         env:
           CI_SIGNING_STORE_FILE: ../ci-keystore.jks
           CI_SIGNING_STORE_PASSWORD: ci-store-pass
