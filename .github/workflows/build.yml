@@ -56,24 +56,20 @@ jobs:
         run: |
           ./gradle-8.6/bin/gradle :app:assembleRelease --no-daemon --stacktrace
 
-      - name: Collect and upload APKs
-        if: always()
-        run: |
-          mkdir -p artifacts
-          echo "=== Scanning for APK files ==="
-          find . -path '*/build/outputs/apk/*' -name '*.apk' -type f 2>/dev/null | while read f; do
-            cp "$f" artifacts/
-            echo "  $f ($(wc -c < "$f") bytes)"
-          done
-          echo ""
-          echo "=== Artifacts to upload ==="
-          ls -la artifacts/ || echo "  (none)"
-
-      - name: Upload APKs
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: app-apks
-          path: artifacts/
+          name: app-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: app-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: warn
           retention-days: 30
