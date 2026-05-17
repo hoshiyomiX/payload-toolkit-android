@@ -21,10 +21,18 @@ The compression algorithm is determined by the InstallOperation type:
 import bz2
 import gzip
 import io
-import lzma
 import sys
 
-# Import brotli only if available; otherwise it stays None.
+# Import lzma only if available; requires liblzma on the system.
+# On Termux: liblzma is included with 'pkg install python'.
+try:
+    import lzma as _lzma_mod
+    _HAS_LZMA = True
+except ImportError:
+    _lzma_mod = None
+    _HAS_LZMA = False
+
+# Import brotli only if available; requires 'pip install brotli'.
 try:
     import brotli as _brotli_mod
     _HAS_BROTLI = True
@@ -87,7 +95,13 @@ def compress(data, algorithm="gzip"):
         return buf.getvalue()
 
     if alg == ALG_XZ:
-        return lzma.compress(data, format=lzma.FORMAT_XZ, preset=9 | lzma.PRESET_EXTREME)
+        if not _HAS_LZMA:
+            raise RuntimeError(
+                "XZ compression requires the 'lzma' module (liblzma).  "
+                "On Termux: pkg install python  (includes liblzma).  "
+                "On Linux: apt install liblzma-dev && reinstall Python."
+            )
+        return _lzma_mod.compress(data, format=_lzma_mod.FORMAT_XZ, preset=9 | _lzma_mod.PRESET_EXTREME)
 
     if alg == ALG_BROTLI:
         if not _HAS_BROTLI:
@@ -143,7 +157,12 @@ def decompress(data, algorithm="auto"):
             return f.read()
 
     if alg == ALG_XZ:
-        return lzma.decompress(data, format=lzma.FORMAT_XZ)
+        if not _HAS_LZMA:
+            raise RuntimeError(
+                "XZ decompression requires the 'lzma' module (liblzma).  "
+                "On Termux: pkg install python  (includes liblzma)."
+            )
+        return _lzma_mod.decompress(data, format=_lzma_mod.FORMAT_XZ)
 
     if alg == ALG_BROTLI:
         if not _HAS_BROTLI:
@@ -226,6 +245,11 @@ def is_brotli_available():
     return _HAS_BROTLI
 
 
+def is_lzma_available():
+    """Return True if the lzma module is importable."""
+    return _HAS_LZMA
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -260,13 +284,8 @@ def _detect_from_data(data):
     if not data or len(data) < 4:
         return ALG_NONE
 
-    # Brotli: no reliable magic, but we can try heuristics.
-    # Brotli frames start with specific bit patterns.
-    # For now, try to detect other formats first; if none match, try brotli.
-
-    # XZ magic: FD 37 7A 58 5A 00
-    if data[:6] == b"\xFD\x37\x7A\x58\x5A\x00":
-        return ALG_XZ
+    # Detect format from magic bytes.
+    # Order matters: check specific magic patterns first.
 
     # Gzip magic: 1F 8B
     if data[:2] == b"\x1F\x8B":
@@ -276,8 +295,12 @@ def _detect_from_data(data):
     if data[:3] == b"\x42\x5A\x68":
         return ALG_BZIP2
 
-    # If we have brotli available, try to decompress to verify.
-    # Brotli has no fixed magic, so this is a best-effort check.
+    # XZ magic: FD 37 7A 58 5A 00 (only if lzma module is available)
+    if _HAS_LZMA and len(data) >= 6:
+        if data[:6] == b"\xFD\x37\x7A\x58\x5A\x00":
+            return ALG_XZ
+
+    # Brotli: no reliable magic, try trial decompression if available.
     if _HAS_BROTLI and len(data) >= 3:
         try:
             _brotli_mod.decompress(data)

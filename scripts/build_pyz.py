@@ -62,11 +62,12 @@ def _print_help(version):
     print("Usage: python3 payload_toolkit.pyz <mode> [options]")
     print()
     print("Modes:")
-    print("  info  -i <payload.bin>                       Parse payload.bin metadata")
-    print("  dump  -i <payload.bin> -o <dir> [-p p1,p2]   Extract partition images")
-    print("  gen   -i <img_dir> -o <output.bin> [-c alg]  Generate payload.bin")
-    print("  zip   -i <img_dir> -o <output.zip> [-n name] Generate flashable OTA ZIP")
-    print("  sign  -i <payload.bin> -k <key.pem> [-o out] Sign payload.bin")
+    print("  info       -i <payload.bin>                       Parse payload.bin metadata")
+    print("  dump       -i <payload.bin> -o <dir> [-p p1,p2]   Extract partition images")
+    print("  gen        -i <img_dir> -o <output.bin> [-c alg]  Generate payload.bin")
+    print("  zip        -i <img_dir> -o <output.zip> [-n name] Generate flashable OTA ZIP")
+    print("  sign       -i <payload.bin> -k <key.pem> [-o out] Sign payload.bin")
+    print("  check-deps                                          Check dependency health")
     print()
     print("Options:")
     print("  -c, --compress <alg>  Compression: none, bzip2, gzip, xz, brotli")
@@ -77,6 +78,7 @@ def _print_help(version):
     print("  -p, --partitions <p>  Comma-separated partition names")
     print("  -v, --verbose         Verbose output")
     print("  --version             Show version")
+    print("  --check-deps          Check Python dependency availability")
     print("  -h, --help            Show this help")
 
 
@@ -93,8 +95,13 @@ def main():
         print("payload_toolkit v%s" % __version__)
         sys.exit(0)
 
+    if args[0] in ("--check-deps", "check-deps"):
+        from payload_toolkit import check_dependencies_text
+        print(check_dependencies_text())
+        sys.exit(0)
+
     mode = args[0].lower()
-    supported = ("info", "dump", "gen", "zip", "sign")
+    supported = ("info", "dump", "gen", "zip", "sign", "check-deps")
 
     if mode not in supported:
         print("Error: Unknown mode \\'%s\\'. Supported: %s" % (mode, ", ".join(supported)),

@@ -258,6 +258,28 @@ object PythonBridge {
     fun getPyzPath(): String? = pyzPath
 
     /**
+     * Run dependency health check via .pyz --check-deps.
+     * Returns a human-readable report string.
+     */
+    fun checkDependencies(): String {
+        val py = pythonPath
+            ?: return "ERROR: Python not initialized. Install Termux, then: pkg install python"
+        val pyz = pyzPath
+            ?: return "ERROR: .pyz not extracted from assets"
+
+        return try {
+            val process = ProcessBuilder(py, pyz, "--check-deps")
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
+            output.ifEmpty { "Dependency check returned no output (exit code ${process.exitValue()})" }
+        } catch (e: Exception) {
+            "Failed to check dependencies: ${e.message}"
+        }
+    }
+
+    /**
      * Check if Termux is installed on the device.
      */
     fun isTermuxInstalled(): Boolean {

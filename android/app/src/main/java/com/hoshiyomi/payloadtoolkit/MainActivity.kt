@@ -134,6 +134,12 @@ class MainActivity : AppCompatActivity() {
                         lifecycleScope.launch {
                             val ptVer = PayloadBridge.getPyzVersion()
                             if (ptVer != null) showLog("payload_toolkit $ptVer loaded\n")
+
+                            // Run dependency health check
+                            val depReport = withContext(Dispatchers.IO) {
+                                PythonBridge.checkDependencies()
+                            }
+                            showLog(depReport + "\n")
                         }
 
                         showLog("\u2550".repeat(50) + "\n\n")
@@ -342,7 +348,15 @@ class MainActivity : AppCompatActivity() {
 
         if (!PythonBridge.isReady()) {
             showLog("ERROR: Python runtime not available.\n")
-            showLog("Install Python via Termux: pkg install python\n")
+            showLog("Install Python via Termux: pkg install python\n\n")
+
+            // Show dependency check if .pyz is extracted
+            lifecycleScope.launch {
+                val depReport = withContext(Dispatchers.IO) {
+                    PythonBridge.checkDependencies()
+                }
+                showLog(depReport + "\n")
+            }
             return
         }
 
