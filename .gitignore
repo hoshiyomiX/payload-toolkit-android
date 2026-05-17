@@ -167,5 +167,8 @@ $RECYCLE.BIN/
 # VS Code
 .vscode/
 
+# CI temporary files
+ci-keystore.jks
+
 # Chaquopy plugin JAR (downloaded by setup script)
 android/chaquopy_plugin/*.jar

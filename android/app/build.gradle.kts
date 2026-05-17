@@ -24,6 +24,18 @@ android {
         }
     }
 
+    // CI signing config — activated via -PciSigning=true
+    signingConfigs {
+        if (project.hasProperty("ciSigning") && project.property("ciSigning") == "true") {
+            create("ci") {
+                storeFile = file(findProperty("ciKeystoreFile") ?: "ci-keystore.jks")
+                storePassword = findProperty("ciKeystorePass") as String? ?: System.getenv("CI_SIGNING_STORE_PASSWORD") ?: ""
+                keyAlias = findProperty("ciKeyAlias") as String? ?: System.getenv("CI_SIGNING_KEY_ALIAS") ?: "ci-key"
+                keyPassword = findProperty("ciKeyPass") as String? ?: System.getenv("CI_SIGNING_KEY_PASSWORD") ?: ""
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -32,6 +44,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (project.hasProperty("ciSigning") && project.property("ciSigning") == "true") {
+                signingConfig = signingConfigs.getByName("ci")
+            }
         }
         debug {
             isMinifyEnabled = false
@@ -58,8 +73,10 @@ android {
     // Chaquopy requires the Python source to be in a specific location
     sourceSets {
         getByName("main") {
-            // Python source directory (the payload_toolkit package)
-            python.srcDir("../../src/payload_toolkit")
+            // Python source root — the payload_toolkit package lives under src/
+            // Chaquopy adds this to sys.path, so `import payload_toolkit` resolves
+            // to src/payload_toolkit/__init__.py and its sub-modules.
+            python.srcDir("../../src")
         }
     }
 
