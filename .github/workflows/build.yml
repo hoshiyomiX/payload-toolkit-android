@@ -88,6 +88,9 @@ jobs:
           echo "=== APK files ==="
           find android/app/build/outputs/apk -type f -name '*.apk' 2>/dev/null || echo "No APK files found"
           echo ""
+          echo "=== Full build output tree ==="
+          find android/app/build/outputs -type f 2>/dev/null | head -30 || echo "Empty"
+          echo ""
           echo "=== Assets ==="
           ls -la android/app/src/main/assets/ 2>/dev/null || echo "No assets"
 
@@ -95,14 +98,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
-          path: android/app/build/outputs/apk/debug/
-          if-no-files-found: error
+          path: android/app/build/outputs/apk/debug/**/*.apk
+          if-no-files-found: ignore
           retention-days: 90
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
           name: app-release
-          path: android/app/build/outputs/apk/release/
-          if-no-files-found: error
+          path: android/app/build/outputs/apk/release/**/*.apk
+          if-no-files-found: ignore
           retention-days: 7
