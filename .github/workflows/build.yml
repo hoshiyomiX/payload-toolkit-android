@@ -42,9 +42,9 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
             android/.gradle
-          key: gradle-v2-${{ runner.os }}-${{ hashFiles('android/**/*.gradle', 'android/**/*.gradle.kts', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          key: gradle-v3-${{ runner.os }}-${{ hashFiles('android/**/*.gradle', 'android/**/*.gradle.kts', 'android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
-            gradle-v2-${{ runner.os }}-
+            gradle-v3-${{ runner.os }}-
 
       - name: Build payload_toolkit.pyz
         run: python3 scripts/build_pyz.py
@@ -105,9 +105,9 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
             android/.gradle
-          key: gradle-v2-${{ runner.os }}-${{ hashFiles('android/**/*.gradle', 'android/**/*.gradle.kts', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          key: gradle-v3-${{ runner.os }}-${{ hashFiles('android/**/*.gradle', 'android/**/*.gradle.kts', 'android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
-            gradle-v2-${{ runner.os }}-
+            gradle-v3-${{ runner.os }}-
 
       - name: Build payload_toolkit.pyz
         run: python3 scripts/build_pyz.py
@@ -140,7 +140,7 @@ jobs:
             -PciKeystorePass=ci-store-pass \
             -PciKeyAlias=ci-key \
             -PciKeyPass=ci-key-pass \
-            --no-daemon --stacktrace
+            --no-daemon --rerun-tasks --stacktrace
 
       - name: List build outputs
         if: always()
