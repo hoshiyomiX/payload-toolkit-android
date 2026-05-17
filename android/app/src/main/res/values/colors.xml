@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Color palette for Payload Toolkit (Material Design 3)
+        Uses a green/teal theme to differentiate from generic blue apps.
+    -->
+
+    <!-- Primary colors (teal) -->
+    <color name="md_theme_light_primary">#006B5A</color>
+    <color name="md_theme_light_onPrimary">#FFFFFF</color>
+    <color name="md_theme_light_primaryContainer">#7AF8DA</color>
+    <color name="md_theme_light_onPrimaryContainer">#00201B</color>
+
+    <!-- Secondary colors (amber) -->
+    <color name="md_theme_light_secondary">#4B635B</color>
+    <color name="md_theme_light_onSecondary">#FFFFFF</color>
+    <color name="md_theme_light_secondaryContainer">#CDE8DD</color>
+    <color name="md_theme_light_onSecondaryContainer">#07201A</color>
+
+    <!-- Tertiary colors (blue-gray) -->
+    <color name="md_theme_light_tertiary">#426278</color>
+    <color name="md_theme_light_onTertiary">#FFFFFF</color>
+    <color name="md_theme_light_tertiaryContainer">#C7E7FF</color>
+    <color name="md_theme_light_onTertiaryContainer">#001E30</color>
+
+    <!-- Error colors -->
+    <color name="md_theme_light_error">#BA1A1A</color>
+    <color name="md_theme_light_onError">#FFFFFF</color>
+    <color name="md_theme_light_errorContainer">#FFDAD6</color>
+    <color name="md_theme_light_onErrorContainer">#410002</color>
+
+    <!-- Background and surface -->
+    <color name="md_theme_light_background">#FAFDFB</color>
+    <color name="md_theme_light_onBackground">#191C1B</color>
+    <color name="md_theme_light_surface">#FAFDFB</color>
+    <color name="md_theme_light_onSurface">#191C1B</color>
+    <color name="md_theme_light_surfaceVariant">#DBE5DF</color>
+    <color name="md_theme_light_onSurfaceVariant">#3F4944</color>
+
+    <!-- Outline -->
+    <color name="md_theme_light_outline">#6F7974</color>
+    <color name="md_theme_light_outlineVariant">#BFC9C3</color>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- Dark theme colors                                             -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+
+    <!-- Primary colors (teal) -->
+    <color name="md_theme_dark_primary">#5CDBBF</color>
+    <color name="md_theme_dark_onPrimary">#00382E</color>
+    <color name="md_theme_dark_primaryContainer">#005145</color>
+    <color name="md_theme_dark_onPrimaryContainer">#7AF8DA</color>
+
+    <!-- Secondary colors (amber) -->
+    <color name="md_theme_dark_secondary">#B1CCC1</color>
+    <color name="md_theme_dark_onSecondary">#1D352E</color>
+    <color name="md_theme_dark_secondaryContainer">#334B44</color>
+    <color name="md_theme_dark_onSecondaryContainer">#CDE8DD</color>
+
+    <!-- Tertiary colors (blue-gray) -->
+    <color name="md_theme_dark_tertiary">#ACCBE3</color>
+    <color name="md_theme_dark_onTertiary">#073547</color>
+    <color name="md_theme_dark_tertiaryContainer">#2B4C60</color>
+    <color name="md_theme_dark_onTertiaryContainer">#C7E7FF</color>
+
+    <!-- Error colors -->
+    <color name="md_theme_dark_error">#FFB4AB</color>
+    <color name="md_theme_dark_onError">#690005</color>
+    <color name="md_theme_dark_errorContainer">#93000A</color>
+    <color name="md_theme_dark_onErrorContainer">#FFDAD6</color>
+
+    <!-- Background and surface -->
+    <color name="md_theme_dark_background">#191C1B</color>
+    <color name="md_theme_dark_onBackground">#E1E3E0</color>
+    <color name="md_theme_dark_surface">#191C1B</color>
+    <color name="md_theme_dark_onSurface">#E1E3E0</color>
+    <color name="md_theme_dark_surfaceVariant">#3F4944</color>
+    <color name="md_theme_dark_onSurfaceVariant">#BFC9C3</color>
+
+    <!-- Outline -->
+    <color name="md_theme_dark_outline">#89938E</color>
+    <color name="md_theme_dark_outlineVariant">#3F4944</color>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- Utility colors                                                -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+
+    <!-- Chip backgrounds -->
+    <color name="chip_selected_bg">#E0F2F1</color>
+    <color name="chip_default_bg">#F5F5F5</color>
+
+    <!-- Log output background -->
+    <color name="log_background">#1E1E1E</color>
+    <color name="log_text">#D4D4D4</color>
+    <color name="log_error">#F44336</color>
+    <color name="log_success">#4CAF50</color>
+    <color name="log_warning">#FF9800</color>
+    <color name="log_info">#80CBC4</color>
+
+    <!-- Status colors -->
+    <color name="status_running">#FF9800</color>
+    <color name="status_success">#4CAF50</color>
+    <color name="status_error">#F44336</color>
+
+    <!-- Card colors -->
+    <color name="card_border">#E0E0E0</color>
+</resources>

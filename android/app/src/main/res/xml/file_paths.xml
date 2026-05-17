@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- App-specific storage for sharing generated files -->
+    <files-path name="output" path="output/" />
+    <files-path name="extracted" path="extracted/" />
+    <files-path name="input" path="input/" />
+    <files-path name="keys" path="keys/" />
+
+    <!-- Cache for temporary files -->
+    <cache-path name="tmp" path="tmp/" />
+
+    <!-- External storage (for Android 10 and below) -->
+    <external-files-path name="downloads" path="Download/PayloadToolkit/" />
+</paths>

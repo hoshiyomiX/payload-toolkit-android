@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App name -->
+    <string name="app_name">Payload Toolkit</string>
+
+    <!-- Toolbar -->
+    <string name="toolbar_subtitle">OTA Payload Manipulation</string>
+    <string name="menu_about">About</string>
+    <string name="menu_settings">Settings</string>
+
+    <!-- Mode names -->
+    <string name="mode_info">INFO</string>
+    <string name="mode_dump">DUMP</string>
+    <string name="mode_gen">GEN</string>
+    <string name="mode_zip">ZIP</string>
+    <string name="mode_sign">SIGN</string>
+
+    <!-- Mode descriptions -->
+    <string name="mode_info_desc">Parse and display payload.bin metadata</string>
+    <string name="mode_dump_desc">Extract partition images from payload.bin</string>
+    <string name="mode_gen_desc">Generate payload.bin from .img files</string>
+    <string name="mode_zip_desc">Generate flashable OTA ZIP</string>
+    <string name="mode_sign_desc">Sign payload.bin with RSA key</string>
+
+    <!-- Input section -->
+    <string name="label_input_file">Input File</string>
+    <string name="hint_input_file">Select payload.bin or .img file</string>
+    <string name="button_browse">Browse</string>
+    <string name="button_add_images">Add Images</string>
+
+    <!-- Output section -->
+    <string name="label_output_dir">Output Directory</string>
+    <string name="hint_output_dir">Select output directory</string>
+
+    <!-- Compression section -->
+    <string name="label_compression">Compression</string>
+    <string name="compression_none">None (raw)</string>
+    <string name="compression_bzip2">bzip2 (standard OTA)</string>
+    <string name="compression_gzip">gzip</string>
+    <string name="compression_xz">xz (smallest)</string>
+    <string name="compression_brotli">brotli (Android 11+)</string>
+
+    <!-- Sign section -->
+    <string name="label_sign_options">Signing Options</string>
+    <string name="label_private_key">Private Key (PEM)</string>
+    <string name="label_public_cert">Public Certificate (PEM)</string>
+    <string name="button_browse_key">Browse Key</string>
+    <string name="button_browse_cert">Browse Cert</string>
+
+    <!-- Actions -->
+    <string name="button_execute">Execute</string>
+    <string name="button_cancel">Cancel</string>
+    <string name="button_clear_log">Clear Log</string>
+
+    <!-- Image list -->
+    <string name="label_image_list">Partition Images</string>
+    <string name="hint_no_images">No images added yet</string>
+
+    <!-- OTA ZIP options -->
+    <string name="label_device_info">Device Info</string>
+    <string name="label_device">Device</string>
+    <string name="hint_device">e.g., S666LN,itel-S666LN</string>
+    <string name="label_fingerprint">Build Fingerprint</string>
+    <string name="hint_fingerprint">e.g., Itel/S666LN-OP/…</string>
+
+    <!-- Status messages -->
+    <string name="status_initializing">Initializing Python runtime…</string>
+    <string name="status_executing">Executing…</string>
+    <string name="status_completed">Completed</string>
+    <string name="status_failed">Failed</string>
+    <string name="status_cancelled">Cancelled</string>
+
+    <!-- Error messages -->
+    <string name="error_no_input">No input file selected</string>
+    <string name="error_no_output">No output directory selected</string>
+    <string name="error_no_images">No partition images added</string>
+    <string name="error_python_not_init">Python runtime not initialized</string>
+    <string name="error_file_not_found">File not found</string>
+    <string name="error_invalid_payload">Invalid payload.bin file (missing CrAU magic)</string>
+    <string name="error_permission_denied">Storage permission denied</string>
+
+    <!-- Permission dialog -->
+    <string name="permission_storage_title">Storage Permission Required</string>
+    <string name="permission_storage_message">Payload Toolkit needs storage access to read and write payload files.</string>
+    <string name="permission_grant">Grant Access</string>
+    <string name="permission_cancel">Cancel</string>
+
+    <!-- About dialog -->
+    <string name="about_title">About Payload Toolkit</string>
+    <string name="about_version">Version %1$s</string>
+    <string name="about_description">Non-root Android APK for OTA payload manipulation.\n\nBased on payload_toolkit.py v2.0 — AOSP-compliant OTA payload.bin toolkit.\n\nPowered by Chaquopy (Python on Android).</string>
+    <string name="about_ok">OK</string>
+
+    <!-- Content descriptions -->
+    <string name="desc_progress">Operation progress</string>
+    <string name="desc_mode_chip">Select operation mode</string>
+    <string name="desc_log_output">Operation log output</string>
+</resources>
