@@ -84,7 +84,7 @@ android {
 chaquopy {
     defaultConfig {
         // Python version embedded in the APK
-        version = "3.12"
+        version = "3.11"
 
         // Python packages to pip install (none needed — stdlib only)
         pip {
@@ -94,11 +94,6 @@ chaquopy {
         }
     }
 
-    productFlavors {
-        getByName("default") {
-            // No additional Python packages needed
-        }
-    }
 }
 
 dependencies {
