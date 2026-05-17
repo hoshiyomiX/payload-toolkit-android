@@ -1,4 +1,4 @@
-name: Build aarch64 Binary
+name: Build .pyz (arch-independent)
 
 on:
   push:
@@ -19,53 +19,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-aarch64:
-    name: Build aarch64 binary
+  build-pyz:
+    name: Build payload_toolkit.pyz
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up QEMU (multiarch emulation)
-        uses: docker/setup-qemu-action@v3
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-      - name: Build standalone aarch64 binary
+      - name: Build payload_toolkit.pyz
+        run: python3 scripts/build_pyz.py
+
+      - name: Verify .pyz
         run: |
-          docker run --rm --platform linux/arm64 \
-            -v "$PWD:/src" \
-            python:3.11-slim \
-            bash -c "cd /src && \
-              echo '=== Verifying files ===' && \
-              ls -la ci/ && \
-              cat ci/payload_toolkit.spec | head -3 && \
-              echo '=== Installing dependencies ===' && \
-              apt-get update -qq && apt-get install -y -qq binutils > /dev/null 2>&1 && \
-              pip install --no-cache-dir pyinstaller && \
-              echo '=== Running PyInstaller ===' && \
-              pyinstaller \
-                --distpath /src/dist \
-                --workpath /tmp/pyinstaller-work \
-                ci/payload_toolkit.spec"
+          echo "=== .pyz details ==="
+          ls -lh dist/payload_toolkit.pyz
+          file dist/payload_toolkit.pyz
+          python3 dist/payload_toolkit.pyz --version
+          python3 dist/payload_toolkit.pyz --help
 
-      - name: Verify binary
-        run: |
-          ls -lh dist/
-          file dist/payload_toolkit 2>/dev/null || echo "Binary not found"
-          # Quick smoke test
-          docker run --rm --platform linux/arm64 \
-            -v "$PWD/dist:/dist" \
-            python:3.11-slim \
-            /dist/payload_toolkit --version || true
-          docker run --rm --platform linux/arm64 \
-            -v "$PWD/dist:/dist" \
-            python:3.11-slim \
-            /dist/payload_toolkit --help || true
-
-      - name: Upload aarch64 binary
+      - name: Upload .pyz artifact
         uses: actions/upload-artifact@v4
         with:
-          name: payload_toolkit-aarch64
-          path: dist/payload_toolkit
+          name: payload-toolkit-pyz
+          path: dist/payload_toolkit.pyz
           if-no-files-found: error
           retention-days: 30

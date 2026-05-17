@@ -1,60 +1,46 @@
-name: Release aarch64 Binary
+name: Release .pyz
 
 on:
   push:
     tags:
-      - 'v*'
+      - 'pyz-v*'
 
 permissions:
   contents: write
 
 jobs:
   release:
-    name: Build & Release aarch64 binary
+    name: Build & Release .pyz
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-      - name: Build standalone aarch64 binary
-        run: |
-          docker run --rm --platform linux/arm64 \
-            -v "$PWD:/src" \
-            python:3.11-slim \
-            bash -c "cd /src && \
-              apt-get update -qq && apt-get install -y -qq binutils > /dev/null 2>&1 && \
-              pip install --no-cache-dir pyinstaller && \
-              pyinstaller \
-                --distpath /src/dist \
-                --workpath /tmp/pyinstaller-work \
-                ci/payload_toolkit.spec"
+      - name: Build payload_toolkit.pyz
+        run: python3 scripts/build_pyz.py
 
-      - name: Verify binary
+      - name: Verify .pyz
         run: |
-          ls -lh dist/
-          file dist/payload_toolkit
-
-      - name: Compress binary
-        run: |
-          gzip -k -9 dist/payload_toolkit
-          ls -lh dist/
+          ls -lh dist/payload_toolkit.pyz
+          python3 dist/payload_toolkit.pyz --version
 
       - name: Extract version from tag
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: echo "VERSION=${GITHUB_REF#refs/tags/pyz-v}" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: Release ${{ steps.version.outputs.VERSION }}
+          name: Release payload_toolkit.pyz ${{ steps.version.outputs.VERSION }}
           draft: false
           prerelease: false
           generate_release_notes: true
           files: |
-            dist/payload_toolkit
-            dist/payload_toolkit.gz
+            dist/payload_toolkit.pyz
