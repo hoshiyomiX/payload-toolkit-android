@@ -1,0 +1,64 @@
+name: Release aarch64 Binary
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Release aarch64 binary
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build standalone aarch64 binary
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD:/src" \
+            -w /src/ci \
+            python:3.11-slim \
+            bash -c "
+              set -ex
+              pip install --no-cache-dir pyinstaller
+              pyinstaller \
+                --clean \
+                --distpath /src/dist \
+                --workpath /tmp/pyinstaller-work \
+                --specpath /src/ci \
+                /src/ci/payload_toolkit.spec
+            "
+
+      - name: Verify binary
+        run: |
+          ls -lh dist/
+          file dist/payload_toolkit
+
+      - name: Compress binary
+        run: |
+          gzip -k -9 dist/payload_toolkit
+          ls -lh dist/
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/payload_toolkit
+            dist/payload_toolkit.gz

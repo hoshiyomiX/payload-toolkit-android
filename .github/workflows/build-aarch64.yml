@@ -1,0 +1,70 @@
+name: Build aarch64 Binary
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
+      - '.github/workflows/build.yml'
+      - '.github/workflows/release.yml'
+      - 'android/**'
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-aarch64:
+    name: Build aarch64 binary
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (multiarch emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build standalone aarch64 binary
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD:/src" \
+            -w /src/ci \
+            python:3.11-slim \
+            bash -c "
+              set -ex
+              pip install --no-cache-dir pyinstaller
+              pyinstaller \
+                --clean \
+                --distpath /src/dist \
+                --workpath /tmp/pyinstaller-work \
+                --specpath /src/ci \
+                /src/ci/payload_toolkit.spec
+            "
+
+      - name: Verify binary
+        run: |
+          ls -lh dist/
+          file dist/payload_toolkit 2>/dev/null || echo "Binary not found"
+          # Quick smoke test
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD/dist:/dist" \
+            python:3.11-slim \
+            /dist/payload_toolkit --version || true
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD/dist:/dist" \
+            python:3.11-slim \
+            /dist/payload_toolkit --help || true
+
+      - name: Upload aarch64 binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: payload_toolkit-aarch64
+          path: dist/payload_toolkit
+          if-no-files-found: error
+          retention-days: 30
