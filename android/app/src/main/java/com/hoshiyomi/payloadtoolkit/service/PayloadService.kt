@@ -1,6 +1,7 @@
 package com.hoshiyomi.payloadtoolkit.service
 
 import android.app.*
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
@@ -57,11 +58,9 @@ class PayloadService : Service() {
     }
 
     private fun executeOperation(mode: String, inputPath: String, outputPath: String) {
-        // The actual execution will be delegated to PayloadBridge
-        // For now, this is the service wrapper
         operationJob = serviceScope.launch {
-            // Future: integrate with PayloadBridge for actual execution
-            delay(1000) // Placeholder
+            // Delegated to PayloadBridge in future integration
+            delay(1000)
         }
     }
 

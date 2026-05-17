@@ -88,7 +88,7 @@
     <!-- About dialog -->
     <string name="about_title">About Payload Toolkit</string>
     <string name="about_version">Version %1$s</string>
-    <string name="about_description">Non-root Android APK for OTA payload manipulation.\n\nBased on payload_toolkit.py v2.0 — AOSP-compliant OTA payload.bin toolkit.\n\nPowered by Chaquopy (Python on Android).</string>
+    <string name="about_description">Non-root Android APK for OTA payload manipulation.\n\nBased on payload_toolkit v2.0 — AOSP-compliant OTA payload.bin toolkit.\n\nPowered by Chaquopy (CPython 3.11 on Android).\n\nPython code delivered as .pyz zipapp (35 KB).</string>
     <string name="about_ok">OK</string>
 
     <!-- Content descriptions -->

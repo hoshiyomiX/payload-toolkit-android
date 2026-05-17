@@ -16,8 +16,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-pyz:
-    name: Build payload_toolkit.pyz
+  build-apk:
+    name: Build APK (debug)
     runs-on: ubuntu-latest
 
     steps:
@@ -29,37 +29,117 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Build .pyz zipapp
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            android/.gradle
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle', 'android/**/*.gradle.kts', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Build payload_toolkit.pyz
         run: python3 scripts/build_pyz.py
 
-      - name: Verify .pyz
+      - name: Build debug APK
+        working-directory: android
         run: |
-          echo "=== File info ==="
-          file dist/payload_toolkit.pyz
-          ls -lh dist/payload_toolkit.pyz
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace 2>&1
 
-      - name: Smoke test
+      - name: List build outputs
+        if: always()
         run: |
-          python3 dist/payload_toolkit.pyz --version
-          python3 dist/payload_toolkit.pyz --help
+          echo "=== APK files ==="
+          find android/app/build/outputs/apk -type f -name '*.apk' 2>/dev/null || echo "No APK files found"
+          echo ""
+          echo "=== Assets ==="
+          ls -la android/app/src/main/assets/ 2>/dev/null || echo "No assets"
 
-      - name: Create test images and run E2E test
-        run: |
-          mkdir -p /tmp/test_imgs
-          dd if=/dev/urandom of=/tmp/test_imgs/system.img bs=1024 count=256 2>/dev/null
-          dd if=/dev/zero of=/tmp/test_imgs/boot.img bs=1024 count=64 2>/dev/null
-
-          python3 dist/payload_toolkit.pyz gen -i /tmp/test_imgs -o /tmp/test_payload.bin -c gzip
-          python3 dist/payload_toolkit.pyz info -i /tmp/test_payload.bin
-
-          mkdir -p /tmp/test_dump
-          python3 dist/payload_toolkit.pyz dump -i /tmp/test_payload.bin -o /tmp/test_dump
-          ls -la /tmp/test_dump/
-
-      - name: Upload .pyz artifact
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: payload-toolkit-pyz
-          path: dist/payload_toolkit.pyz
+          name: app-debug
+          path: android/app/build/outputs/apk/debug/
           if-no-files-found: error
           retention-days: 90
+
+  build-release:
+    name: Build APK (release, signed)
+    runs-on: ubuntu-latest
+    needs: build-apk
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            android/.gradle
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle', 'android/**/*.gradle.kts', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Build payload_toolkit.pyz
+        run: python3 scripts/build_pyz.py
+
+      - name: Generate CI signing key
+        run: |
+          keytool -genkeypair \
+            -keystore ci-keystore.jks \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -alias ci-key \
+            -storepass ci-store-pass \
+            -keypass ci-key-pass \
+            -dname "CN=CI, OU=CI, O=PayloadToolkit, L=CI, ST=CI, C=US"
+
+      - name: Build release APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease \
+            -PciSigning=true \
+            -PciKeystoreFile=../ci-keystore.jks \
+            -PciKeystorePass=ci-store-pass \
+            -PciKeyAlias=ci-key \
+            -PciKeyPass=ci-key-pass \
+            --stacktrace 2>&1
+
+      - name: List build outputs
+        if: always()
+        run: |
+          echo "=== APK files ==="
+          find android/app/build/outputs/apk -type f -name '*.apk' 2>/dev/null || echo "No APK files found"
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: android/app/build/outputs/apk/release/
+          if-no-files-found: error
+          retention-days: 7

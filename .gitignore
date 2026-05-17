@@ -83,6 +83,9 @@ MANIFEST
 *.spec
 build_aarch64/
 
+# Generated assets (built by Gradle syncPyz task)
+android/app/src/main/assets/payload_toolkit.pyz
+
 # Unit test / coverage reports
 htmlcov/
 .tox/

@@ -144,11 +144,15 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             showLog("Initializing Python runtime...\n")
             withContext(Dispatchers.IO) {
-                val initialized = PythonBridge.ensureInitialized()
+                val initialized = PythonBridge.ensureInitialized(this@MainActivity)
                 withContext(Dispatchers.Main) {
                     if (initialized) {
-                        val version = PythonBridge.getPythonVersion()
-                        showLog("Python $version initialized (Chaquopy)\n")
+                        val pyVer = PythonBridge.getPythonVersion()
+                        val ptVer = PythonBridge.getPayloadToolkitVersion()
+                        showLog("Python $pyVer initialized (Chaquopy)\n")
+                        if (ptVer != null) {
+                            showLog("payload_toolkit v$ptVer loaded from .pyz\n")
+                        }
                         showLog("Supported modes: ${PayloadBridge.SUPPORTED_MODES.joinToString(", ")}\n")
                         showLog("─".repeat(60) + "\n\n")
                     } else {
