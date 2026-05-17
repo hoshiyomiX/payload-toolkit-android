@@ -3,11 +3,12 @@
     AndroidManifest.xml — Payload Toolkit Android
 
     Package: com.hoshiyomi.payloadtoolkit
-    Min SDK: 26 (Android 8.0 Oreo) — required by Chaquopy for native library loading
+    Min SDK: 26 (Android 8.0 Oreo)
     Target SDK: 34 (Android 14)
 
     Non-root application: no root/system permissions requested.
-    All file I/O uses app-specific storage and SAF (Storage Access Framework).
+    All file I/O uses app-specific storage and SAF.
+    Requires external Python runtime (Termux recommended).
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">

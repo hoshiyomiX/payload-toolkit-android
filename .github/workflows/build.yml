@@ -49,6 +49,11 @@ jobs:
       - name: Build payload_toolkit.pyz
         run: python3 scripts/build_pyz.py
 
+      - name: Copy .pyz to Android assets
+        run: |
+          mkdir -p android/app/src/main/assets
+          cp dist/payload_toolkit.pyz android/app/src/main/assets/
+
       - name: Build debug APK
         working-directory: android
         run: |
@@ -105,6 +110,11 @@ jobs:
 
       - name: Build payload_toolkit.pyz
         run: python3 scripts/build_pyz.py
+
+      - name: Copy .pyz to Android assets
+        run: |
+          mkdir -p android/app/src/main/assets
+          cp dist/payload_toolkit.pyz android/app/src/main/assets/
 
       - name: Generate CI signing key
         run: |

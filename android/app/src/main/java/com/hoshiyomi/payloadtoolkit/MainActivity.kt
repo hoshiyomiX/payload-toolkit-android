@@ -34,7 +34,8 @@ import java.io.FileOutputStream
  *   - Executing operations via [PayloadBridge] with progress indication
  *   - Displaying structured log output
  *
- * Non-root application: all file I/O uses app-specific storage and SAF.
+ * Python runtime: uses external Python (Termux recommended).
+ * The .pyz is bundled as an asset and extracted at first launch.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -58,35 +59,30 @@ class MainActivity : AppCompatActivity() {
     //  Activity Result Launchers (modern file picker API)
     // ═══════════════════════════════════════════════════════════════
 
-    // File picker for input files (payload.bin, .img, etc.)
     private val inputFileChooser = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let { handleInputFileSelected(it) }
     }
 
-    // Directory picker for output
     private val outputDirChooser = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri: Uri? ->
         uri?.let { handleOutputDirSelected(it) }
     }
 
-    // File picker for multiple .img files (gen/zip modes)
     private val imageFileChooser = registerForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris: List<Uri>? ->
         uris?.let { handleImageFilesSelected(it) }
     }
 
-    // File picker for RSA key files (sign mode)
     private val keyFileChooser = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let { handleKeyFileSelected(it) }
     }
 
-    // Permission request launcher
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -94,7 +90,6 @@ class MainActivity : AppCompatActivity() {
         if (!allGranted) {
             showLog("WARNING: Some permissions were denied. File access may be limited.\n")
         }
-        // On Android 11+, also check MANAGE_EXTERNAL_STORAGE
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (!Environment.isExternalStorageManager()) {
                 promptManageStorage()
@@ -115,7 +110,7 @@ class MainActivity : AppCompatActivity() {
         outputDir = File(filesDir, "output").also { it.mkdirs() }
         keysDir = File(filesDir, "keys").also { it.mkdirs() }
 
-        // Initialize Python runtime
+        // Initialize Python bridge
         initializePython()
 
         // Setup UI
@@ -142,22 +137,41 @@ class MainActivity : AppCompatActivity() {
 
     private fun initializePython() {
         lifecycleScope.launch {
-            showLog("Initializing Python runtime...\n")
+            showLog("Initializing Payload Toolkit...\n")
             withContext(Dispatchers.IO) {
-                val initialized = PythonBridge.ensureInitialized(this@MainActivity)
+                val result = PythonBridge.ensureInitialized(this@MainActivity)
                 withContext(Dispatchers.Main) {
-                    if (initialized) {
-                        val pyVer = PythonBridge.getPythonVersion()
-                        val ptVer = PythonBridge.getPayloadToolkitVersion()
-                        showLog("Python $pyVer initialized (Chaquopy)\n")
-                        if (ptVer != null) {
-                            showLog("payload_toolkit v$ptVer loaded from .pyz\n")
+                    if (result.success) {
+                        val pyVer = result.pythonPath?.let {
+                            try {
+                                val pb = ProcessBuilder(it, "--version")
+                                    .redirectErrorStream(true)
+                                    .start()
+                                pb.inputStream.bufferedReader().readText().trim()
+                            } catch (e: Exception) {
+                                "unknown"
+                            }
                         }
+                        showLog("Python runtime: $pyVer\n")
+                        showLog("Path: ${result.pythonPath}\n")
+
+                        // Get .pyz version
+                        lifecycleScope.launch {
+                            val ptVer = PayloadBridge.getPyzVersion()
+                            if (ptVer != null) {
+                                showLog("payload_toolkit $ptVer loaded from .pyz\n")
+                            }
+                        }
+
                         showLog("Supported modes: ${PayloadBridge.SUPPORTED_MODES.joinToString(", ")}\n")
-                        showLog("─".repeat(60) + "\n\n")
+                        showLog("\u2550".repeat(60) + "\n\n")
                     } else {
-                        showLog("ERROR: Failed to initialize Python runtime.\n")
-                        showLog("The app cannot function without Chaquopy.\n")
+                        showLog("WARNING: ${result.error}\n\n")
+                        showLog("This app requires Python to be installed.\n")
+                        showLog("Recommended: Install Termux, then run:\n")
+                        showLog("  pkg install python\n\n")
+                        showLog("After installing Python, restart this app.\n")
+                        showLog("\u2550".repeat(60) + "\n\n")
                     }
                 }
             }
@@ -187,7 +201,6 @@ class MainActivity : AppCompatActivity() {
             }
             chip.setOnClickListener {
                 selectedMode = mode
-                // Update UI for selected mode
                 updateModeUI(mode)
             }
             chipGroup.addView(chip)
@@ -215,32 +228,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupButtons() {
-        // Browse input file button
         findViewById<View>(R.id.buttonBrowseInput).setOnClickListener {
             val mimeType = when (selectedMode) {
-                "sign" -> "*/*"  // key/cert files
-                "gen", "zip" -> "application/octet-stream"  // .img files
-                else -> "application/octet-stream"  // payload.bin
+                "sign" -> "*/*"
+                "gen", "zip" -> "application/octet-stream"
+                else -> "application/octet-stream"
             }
             inputFileChooser.launch(arrayOf(mimeType))
         }
 
-        // Browse output directory button
         findViewById<View>(R.id.buttonBrowseOutput).setOnClickListener {
             outputDirChooser.launch(null)
         }
 
-        // Add image files button (for gen/zip modes)
         findViewById<View>(R.id.buttonAddImages)?.setOnClickListener {
             imageFileChooser.launch(arrayOf("application/octet-stream", "image/*"))
         }
 
-        // Execute button
         findViewById<View>(R.id.buttonExecute).setOnClickListener {
             onExecuteClicked()
         }
 
-        // Clear log button
         findViewById<View>(R.id.buttonClearLog).setOnClickListener {
             findViewById<android.widget.TextView>(R.id.textViewLog).text = ""
         }
@@ -254,7 +262,6 @@ class MainActivity : AppCompatActivity() {
         val permissionsToRequest = mutableListOf<String>()
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            // Android 10 and below
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
                 != PackageManager.PERMISSION_GRANTED
             ) {
@@ -268,7 +275,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // Android 13+ notification permission for foreground service
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED
             ) {
@@ -323,7 +329,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleOutputDirSelected(uri: Uri) {
-        // SAF tree URI — we'll use app-internal output dir and note the SAF path
         outputDirPath = outputDir.absolutePath
         runOnUiThread {
             findViewById<android.widget.EditText>(R.id.editTextOutput)
@@ -336,7 +341,6 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             for (uri in uris) {
                 val fileName = getFileName(uri) ?: "image.img"
-                // Strip .img extension for partition name
                 val partitionName = fileName.removeSuffix(".img")
                 val destFile = File(inputDir, fileName)
                 copyUriToFile(uri, destFile)
@@ -345,7 +349,7 @@ class MainActivity : AppCompatActivity() {
 
             runOnUiThread {
                 val summary = imageFiles.joinToString("\n") { (name, path) ->
-                    "  $name → ${File(path).name}"
+                    "  $name -> ${File(path).name}"
                 }
                 showLog("Image files added:\n$summary\n")
             }
@@ -366,7 +370,6 @@ class MainActivity : AppCompatActivity() {
             Intent.ACTION_VIEW -> {
                 intent.data?.let { uri ->
                     handleInputFileSelected(uri)
-                    // Auto-select info mode for opened files
                     selectedMode = "info"
                     updateModeUI("info")
                 }
@@ -381,9 +384,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Copy a content:// URI to a local file.
-     */
     private suspend fun copyUriToFile(uri: Uri, destFile: File) {
         withContext(Dispatchers.IO) {
             contentResolver.openInputStream(uri)?.use { input ->
@@ -394,9 +394,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Get the display name from a content URI.
-     */
     private fun getFileName(uri: Uri): String? {
         var fileName: String? = null
         contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -419,7 +416,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (!PythonBridge.isReady()) {
-            showLog("ERROR: Python runtime not initialized. Cannot execute.\n")
+            showLog("ERROR: Python runtime not available. Cannot execute.\n")
+            showLog("Install Python via Termux: pkg install python\n")
             return
         }
 
@@ -427,10 +425,10 @@ class MainActivity : AppCompatActivity() {
             isExecuting = true
             setUIExecuting(true)
 
-            showLog("\n${"═".repeat(60)}\n")
+            showLog("\n${"\u2550".repeat(60)}\n")
             showLog("MODE: ${selectedMode.uppercase()}\n")
             showLog("Time: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())}\n")
-            showLog("─".repeat(60) + "\n\n")
+            showLog("\u2500".repeat(60) + "\n\n")
 
             val result = when (selectedMode) {
                 "info" -> executeInfo()
@@ -441,8 +439,7 @@ class MainActivity : AppCompatActivity() {
                 else -> PayloadResult.error("Unknown mode: $selectedMode")
             }
 
-            // Display result
-            showLog("\n" + "═".repeat(60) + "\n")
+            showLog("\n" + "\u2550".repeat(60) + "\n")
             if (result.success) {
                 showLog("COMPLETED in ${result.durationMs}ms\n")
                 if (result.output.isNotBlank()) {
@@ -455,7 +452,7 @@ class MainActivity : AppCompatActivity() {
                     showLog(result.output)
                 }
             }
-            showLog("═".repeat(60) + "\n\n")
+            showLog("\u2550".repeat(60) + "\n\n")
 
             isExecuting = false
             setUIExecuting(false)
@@ -500,7 +497,6 @@ class MainActivity : AppCompatActivity() {
         val outPath = File(outputDirPath ?: outputDir.absolutePath, "partial_ota.zip").absolutePath
         val images = imageFiles.toMap()
 
-        // Use defaults for device/fingerprint — user can modify these in future
         val device = "S666LN,itel-S666LN"
         val fingerprint = "Itel/S666LN-OP/itel-S666LN:13/TP1A.220624.014/251212V1661:user/release-keys"
 
@@ -516,7 +512,6 @@ class MainActivity : AppCompatActivity() {
         }
         val outPath = File(outputDirPath ?: outputDir.absolutePath, "payload_signed.bin").absolutePath
 
-        // Check for key files in keys directory
         val keyFiles = keysDir.listFiles() ?: emptyArray()
         val keyFile = keyFiles.find { it.name.contains("private") || it.name.contains("key") }
         val certFile = keyFiles.find { it.name.contains("cert") || it.name.contains("public") }
@@ -540,7 +535,6 @@ class MainActivity : AppCompatActivity() {
     // ═══════════════════════════════════════════════════════════════
 
     private fun updateModeUI(mode: String) {
-        // Show/hide mode-specific UI elements
         val addImagesButton = findViewById<View>(R.id.buttonAddImages)
         val imageListCard = findViewById<View>(R.id.cardImageList)
         val compressionCard = findViewById<View>(R.id.cardCompression)
@@ -551,7 +545,6 @@ class MainActivity : AppCompatActivity() {
         compressionCard?.visibility = if (mode in listOf("gen", "zip")) View.VISIBLE else View.GONE
         signOptionsCard?.visibility = if (mode == "sign") View.VISIBLE else View.GONE
 
-        // Update hints
         val inputHint = when (mode) {
             "info", "dump" -> "payload.bin path"
             "gen", "zip" -> "Partition images added below"
@@ -568,7 +561,6 @@ class MainActivity : AppCompatActivity() {
                 if (executing) View.VISIBLE else View.GONE
             findViewById<android.widget.EditText>(R.id.editTextInput)?.isEnabled = !executing
 
-            // Disable mode chips during execution
             val chipGroup = findViewById<com.google.android.material.chip.ChipGroup>(R.id.chipGroupModes)
             for (i in 0 until chipGroup.childCount) {
                 chipGroup.getChildAt(i)?.isEnabled = !executing
@@ -581,7 +573,6 @@ class MainActivity : AppCompatActivity() {
             val textView = findViewById<android.widget.TextView>(R.id.textViewLog)
             textView?.append(text)
 
-            // Auto-scroll to bottom
             val scrollView = findViewById<android.widget.ScrollView>(R.id.scrollViewLog)
             scrollView?.post { scrollView.fullScroll(View.FOCUS_DOWN) }
         }

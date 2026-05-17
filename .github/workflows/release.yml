@@ -31,6 +31,11 @@ jobs:
       - name: Build payload_toolkit.pyz
         run: python3 scripts/build_pyz.py
 
+      - name: Copy .pyz to Android assets
+        run: |
+          mkdir -p android/app/src/main/assets
+          cp dist/payload_toolkit.pyz android/app/src/main/assets/
+
       - name: Cache Gradle packages
         uses: actions/cache@v4
         with:

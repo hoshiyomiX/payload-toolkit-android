@@ -17,12 +17,6 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven {
-            url = uri("https://chaquo.com/maven")
-            content {
-                includeGroupByRegex("com\\.chaquo\\..*")
-            }
-        }
     }
 }
 

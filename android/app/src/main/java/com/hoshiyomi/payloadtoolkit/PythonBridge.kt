@@ -2,23 +2,19 @@ package com.hoshiyomi.payloadtoolkit
 
 import android.content.Context
 import android.util.Log
-import com.chaquo.python.kotlin.PyException
-import com.chaquo.python.kotlin.PyObject
-import com.chaquo.python.kotlin.Python
 import java.io.File
+import java.io.FileOutputStream
 
 /**
- * PythonBridge — Chaquopy initialization + .pyz loader.
+ * PythonBridge — Manages .pyz extraction and external Python discovery.
  *
  * Architecture:
- *   1. Chaquopy provides CPython 3.11 runtime (bundled in APK)
- *   2. payload_toolkit.pyz is embedded as an Android asset
- *   3. On first init, .pyz is extracted to app internal storage
- *   4. _bootstrap.py adds .pyz to sys.path → import payload_toolkit works
+ *   1. payload_toolkit.pyz is bundled as an Android asset
+ *   2. On first init, .pyz is extracted to app internal storage
+ *   3. Device Python binary is discovered (Termux, system, etc.)
+ *   4. Execution is done via ProcessBuilder subprocess
  *
- * Thread Safety:
- *   Chaquopy's Python.start() can only be called once per process.
- *   All Python operations hold the GIL.
+ * No Chaquopy dependency — uses whatever Python is available on the device.
  */
 object PythonBridge {
 
@@ -26,194 +22,257 @@ object PythonBridge {
     private const val PYZ_ASSET_NAME = "payload_toolkit.pyz"
     private const val PYZ_DIR_NAME = "python"
 
-    private var pythonInstance: Python? = null
+    /**
+     * Ordered list of Python binary paths to try.
+     * Termux is most common for power users, then system paths.
+     */
+    private val PYTHON_PATHS = listOf(
+        "/data/data/com.termux/files/usr/bin/python3",
+        "/data/data/com.termux/files/usr/bin/python",
+        "/system/bin/python3",
+        "/usr/bin/python3",
+        "/usr/local/bin/python3"
+    )
+
     @Volatile private var initialized = false
+    private var pythonPath: String? = null
+    private var pyzPath: String? = null
     private val initLock = Any()
 
     /**
-     * Initialize Chaquopy Python runtime and load payload_toolkit from .pyz.
+     * Result of Python initialization attempt.
+     */
+    data class InitResult(
+        val success: Boolean,
+        val pythonPath: String?,
+        val pyzPath: String?,
+        val error: String? = null
+    )
+
+    /**
+     * Initialize: extract .pyz from assets and discover Python binary.
      *
      * @param context Android context (for asset extraction)
-     * @return true if Python + payload_toolkit loaded successfully
+     * @return [InitResult] with paths or error description
      */
-    fun ensureInitialized(context: Context? = null): Boolean {
-        if (initialized) return true
+    fun ensureInitialized(context: Context?): InitResult {
+        if (initialized) return InitResult(true, pythonPath, pyzPath)
 
         synchronized(initLock) {
-            if (initialized) return true
+            if (initialized) return InitResult(true, pythonPath, pyzPath)
 
-            try {
-                // Step 1: Start Chaquopy Python
-                pythonInstance = Python.getInstance()
+            val ctx = context
+                ?: return InitResult(false, null, null, "Context required for initialization")
 
-                // Step 2: Extract .pyz from assets and load into sys.path
-                val ctx = context
-                    ?: throw IllegalStateException("Context required for first initialization")
-                initPyz(ctx)
-
-                initialized = true
-                Log.i(TAG, "Python initialized with payload_toolkit.pyz")
-                return true
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to initialize Python", e)
-                initialized = false
-                return false
+            // Step 1: Extract .pyz from assets
+            val extractedPyz = extractPyz(ctx)
+            if (extractedPyz == null) {
+                return InitResult(false, null, null, "Failed to extract $PYZ_ASSET_NAME from assets")
             }
+            pyzPath = extractedPyz
+            Log.d(TAG, "Extracted $PYZ_ASSET_NAME to $pyzPath")
+
+            // Step 2: Find Python binary
+            val foundPython = findPythonBinary()
+            if (foundPython == null) {
+                val hint = "Python not found. Install Termux and run: pkg install python"
+                Log.w(TAG, hint)
+                return InitResult(false, null, pyzPath, hint)
+            }
+            pythonPath = foundPython
+            Log.d(TAG, "Found Python at: $pythonPath")
+
+            // Step 3: Verify Python can run the .pyz
+            val verifyResult = verifySetup()
+            if (verifyResult != null) {
+                Log.w(TAG, "Verification failed: $verifyResult")
+                return InitResult(false, pythonPath, pyzPath, verifyResult)
+            }
+
+            initialized = true
+            return InitResult(true, pythonPath, pyzPath)
         }
     }
 
     /**
-     * Extract payload_toolkit.pyz from assets and add to sys.path.
-     *
-     * The .pyz is extracted to: {context.filesDir}/python/payload_toolkit.pyz
-     * Then _bootstrap.setup() adds it to Python's sys.path.
+     * Extract payload_toolkit.pyz from assets to app-internal storage.
      */
-    private fun initPyz(context: Context) {
-        val py = pythonInstance ?: return
+    private fun extractPyz(context: Context): String? {
         val pythonDir = File(context.filesDir, PYZ_DIR_NAME).also { it.mkdirs() }
         val pyzFile = File(pythonDir, PYZ_ASSET_NAME)
 
-        // Extract .pyz from assets if not already present (or if asset is newer)
-        val needsCopy = !pyzFile.exists() || assetIsNewer(context, pyzFile)
-        if (needsCopy) {
+        // Check if extraction is needed
+        if (pyzFile.exists()) {
             try {
-                context.assets.open(PYZ_ASSET_NAME).use { input ->
-                    pyzFile.outputStream().use { output ->
-                        input.copyTo(output)
-                    }
+                val assetSize = context.assets.open(PYZ_ASSET_NAME).use { it.available().toLong() }
+                if (assetSize == pyzFile.length()) {
+                    return pyzFile.absolutePath // Already up to date
                 }
-                Log.d(TAG, "Extracted $PYZ_ASSET_NAME to ${pyzFile.absolutePath}")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to extract $PYZ_ASSET_NAME from assets", e)
-                throw e
+            } catch (_: Exception) {}
+        }
+
+        return try {
+            context.assets.open(PYZ_ASSET_NAME).use { input ->
+                FileOutputStream(pyzFile).use { output ->
+                    input.copyTo(output)
+                }
             }
-        }
-
-        // Call _bootstrap.setup(pyz_path) to add .pyz to sys.path
-        val bootstrapResult = py.getModule("_bootstrap").callAttr("setup", pyzFile.absolutePath)
-        val success = bootstrapResult.callAttr("get", "success")?.toBoolean() ?: false
-
-        if (success) {
-            val version = bootstrapResult.callAttr("get", "version")?.toString() ?: "unknown"
-            Log.d(TAG, "payload_toolkit v$version loaded from .pyz")
-        } else {
-            val error = bootstrapResult.callAttr("get", "error")?.toString() ?: "unknown error"
-            throw RuntimeException("Failed to load payload_toolkit: $error")
-        }
-
-        // Increase recursion limit for deep protobuf parsing
-        val sys = py.getModule("sys")
-        val currentLimit = sys.callAttr("getrecursionlimit").toInt()
-        if (currentLimit < 5000) {
-            sys.callAttr("setrecursionlimit", 5000)
-        }
-    }
-
-    /**
-     * Check if the asset version is newer than the extracted file.
-     */
-    private fun assetIsNewer(context: Context, extractedFile: File): Boolean {
-        return try {
-            val assetModified = context.assets.open(PYZ_ASSET_NAME).use { it.available().toLong() }
-            // Simple heuristic: if sizes differ, re-extract
-            assetModified != extractedFile.length()
+            pyzFile.absolutePath
         } catch (e: Exception) {
-            false
-        }
-    }
-
-    /**
-     * Call a Python function and return its result.
-     */
-    fun callFunction(module: String, function: String, args: List<Any>? = null): PyObject {
-        val py = pythonInstance
-            ?: throw IllegalStateException("Python not initialized. Call ensureInitialized(context) first.")
-
-        try {
-            val mod = py.getModule(module)
-            return mod.callAttr(function, *(args?.toTypedArray() ?: emptyArray()))
-        } catch (e: PyException) {
-            val traceback = extractTraceback(e)
-            Log.e(TAG, "Python error in $module.$function: $traceback")
-            throw PythonException(module, function, e, traceback)
-        }
-    }
-
-    /**
-     * Execute Python code with stdout captured.
-     */
-    fun captureStdout(block: (Python) -> Unit): String {
-        val py = pythonInstance
-            ?: throw IllegalStateException("Python not initialized. Call ensureInitialized(context) first.")
-
-        val sys = py.getModule("sys")
-        val io = py.getModule("io")
-
-        val originalStdout = sys.getAttr("stdout")
-        val originalStderr = sys.getAttr("stderr")
-        val buffer = io.callAttr("StringIO")
-
-        return try {
-            sys.callAttr("setattr", "stdout", buffer)
-            sys.callAttr("setattr", "stderr", buffer)
-            block(py)
-            buffer.callAttr("flush")
-            buffer.callAttr("getvalue").toString()
-        } catch (e: PyException) {
-            buffer.callAttr("flush")
-            val partialOutput = buffer.callAttr("getvalue").toString()
-            val traceback = extractTraceback(e)
-            Log.e(TAG, "Python error:\n$partialOutput\n\n$traceback")
-            throw PythonException("unknown", "unknown", e, traceback)
-        } finally {
-            try {
-                sys.callAttr("setattr", "stdout", originalStdout)
-                sys.callAttr("setattr", "stderr", originalStderr)
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to restore stdout", e)
-            }
-        }
-    }
-
-    fun isReady(): Boolean = initialized && pythonInstance != null
-
-    fun getPythonVersion(): String? {
-        return try {
-            val py = pythonInstance ?: return null
-            val sys = py.getModule("sys")
-            sys.callAttr("version").callAttr("split").asList().firstOrNull()?.toString()
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to get Python version", e)
+            Log.e(TAG, "Failed to extract $PYZ_ASSET_NAME", e)
             null
         }
     }
 
-    fun getPayloadToolkitVersion(): String? {
+    /**
+     * Discover a usable Python binary on the device.
+     */
+    private fun findPythonBinary(): String? {
+        for (path in PYTHON_PATHS) {
+            val file = File(path)
+            if (file.exists() && file.canExecute()) {
+                return path
+            }
+        }
+
+        // Try 'python3' via PATH (works if Termux is in PATH)
         return try {
-            val py = pythonInstance ?: return null
-            val mod = py.getModule("payload_toolkit")
-            mod.getAttr("__version__").toString()
+            val pb = ProcessBuilder("which", "python3")
+            val process = pb.start()
+            val output = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
+            if (process.exitValue() == 0 && output.isNotEmpty()) {
+                output
+            } else null
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to get payload_toolkit version", e)
             null
         }
     }
 
-    private fun extractTraceback(e: PyException): String {
+    /**
+     * Quick smoke test: run .pyz --version.
+     */
+    private fun verifySetup(): String? {
+        val py = pythonPath ?: return "No Python path"
+        val pyz = pyzPath ?: return "No .pyz path"
+
         return try {
-            val py = pythonInstance ?: return e.message ?: "Unknown Python error"
-            val tracebackModule = py.getModule("traceback")
-            val formatted = tracebackModule.callAttr("format_exception", e.type, e.value, e.traceback)
-            formatted.asList().joinToString("")
+            val process = ProcessBuilder(py, pyz, "--version")
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.bufferedReader().readText().trim()
+            val exitCode = process.waitFor()
+            if (exitCode == 0 && output.isNotEmpty()) {
+                Log.d(TAG, "Verify OK: $output")
+                null // Success
+            } else {
+                "Python returned exit code $exitCode: $output"
+            }
         } catch (e: Exception) {
-            e.message ?: "Unknown Python error"
+            "Failed to run Python: ${e.message}"
         }
+    }
+
+    /**
+     * Execute payload_toolkit.pyz with given arguments.
+     *
+     * @param args CLI arguments (e.g., ["info", "-i", "/path/to/payload.bin"])
+     * @return [ExecResult] with stdout, stderr, exit code, and duration
+     */
+    fun executePyz(args: List<String>): ExecResult {
+        val py = pythonPath
+            ?: return ExecResult("", "Python not initialized", -1, 0)
+        val pyz = pyzPath
+            ?: return ExecResult("", ".pyz not found", -1, 0)
+
+        val startTime = System.currentTimeMillis()
+        return try {
+            val command = mutableListOf(py, pyz)
+            command.addAll(args)
+
+            val process = ProcessBuilder(command)
+                .redirectErrorStream(true)
+                .start()
+
+            val output = process.inputStream.bufferedReader().readText()
+            val exitCode = process.waitFor()
+            val duration = System.currentTimeMillis() - startTime
+
+            ExecResult(output, null, exitCode, duration)
+        } catch (e: Exception) {
+            val duration = System.currentTimeMillis() - startTime
+            ExecResult("", "Execution failed: ${e.message}", -1, duration)
+        }
+    }
+
+    /**
+     * Execute payload_toolkit.pyz with Termux environment variables set.
+     * This ensures Termux's Python can find its stdlib and native libs.
+     */
+    fun executePyzWithTermuxEnv(args: List<String>): ExecResult {
+        val py = pythonPath
+            ?: return ExecResult("", "Python not initialized", -1, 0)
+        val pyz = pyzPath
+            ?: return ExecResult("", ".pyz not found", -1, 0)
+
+        // Detect Termux Python and set appropriate environment
+        val env = mutableMapOf<String, String>()
+        if (py.contains("termux")) {
+            env["TERMUX_PREFIX"] = "/data/data/com.termux/files/usr"
+            env["LD_LIBRARY_PATH"] = "/data/data/com.termux/files/usr/lib"
+            env["PATH"] = "/data/data/com.termux/files/usr/bin:${System.getenv("PATH")}"
+            env["HOME"] = "/data/data/com.termux/files/home"
+            env["TMPDIR"] = "/data/data/com.termux/files/usr/tmp"
+        }
+
+        val startTime = System.currentTimeMillis()
+        return try {
+            val command = mutableListOf(py, pyz)
+            command.addAll(args)
+
+            val pb = ProcessBuilder(command)
+                .redirectErrorStream(true)
+
+            // Merge environment variables
+            val envBlock = pb.environment()
+            for ((key, value) in env) {
+                envBlock[key] = value
+            }
+
+            val process = pb.start()
+            val output = process.inputStream.bufferedReader().readText()
+            val exitCode = process.waitFor()
+            val duration = System.currentTimeMillis() - startTime
+
+            ExecResult(output, null, exitCode, duration)
+        } catch (e: Exception) {
+            val duration = System.currentTimeMillis() - startTime
+            ExecResult("", "Execution failed: ${e.message}", -1, duration)
+        }
+    }
+
+    fun isReady(): Boolean = initialized && pythonPath != null && pyzPath != null
+
+    fun getPythonPath(): String? = pythonPath
+
+    fun getPyzPath(): String? = pyzPath
+
+    /**
+     * Check if Termux is installed on the device.
+     */
+    fun isTermuxInstalled(): Boolean {
+        return PYTHON_PATHS.any { it.contains("termux") && File(it).exists() }
     }
 }
 
-class PythonException(
-    val module: String,
-    val function: String,
-    val cause: PyException,
-    val traceback: String
-) : Exception("Python error in $module.$function: ${cause.message}\n\n$traceback", cause)
+/**
+ * Result of executing a Python subprocess.
+ */
+data class ExecResult(
+    val output: String,
+    val error: String?,
+    val exitCode: Int,
+    val durationMs: Long
+) {
+    val success: Boolean get() = exitCode == 0 && error == null
+}
