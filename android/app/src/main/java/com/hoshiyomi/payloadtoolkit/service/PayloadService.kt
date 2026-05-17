@@ -1,7 +1,7 @@
 package com.hoshiyomi.payloadtoolkit.service
 
 import android.app.Service
-import android.app.ServiceInfo
+import android.content.pm.ServiceInfo
 import android.content.Context
 import android.content.Intent
 import android.os.Build
