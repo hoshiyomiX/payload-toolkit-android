@@ -5,10 +5,6 @@
 apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
 
-// ═══════════════════════════════════════════════════════════════
-//  Android configuration
-// ═══════════════════════════════════════════════════════════════
-
 android {
     namespace 'com.hoshiyomi.payloadtoolkit'
     compileSdk 34
@@ -23,24 +19,11 @@ android {
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
 
-    signingConfigs {
-        if (project.hasProperty('ciSigning') && project.property('ciSigning') == 'true') {
-            ci {
-                storeFile file(findProperty('ciKeystoreFile') ?: 'ci-keystore.jks')
-                storePassword findProperty('ciKeystorePass') ?: ''
-                keyAlias findProperty('ciKeyAlias') ?: 'ci-key'
-                keyPassword findProperty('ciKeyPass') ?: ''
-            }
-        }
-    }
-
     buildTypes {
         release {
             minifyEnabled false
             shrinkResources false
-            if (project.hasProperty('ciSigning') && project.property('ciSigning') == 'true') {
-                signingConfig signingConfigs.ci
-            }
+            signingConfig signingConfigs.debug // Use debug key for CI
         }
         debug {
             minifyEnabled false
@@ -70,15 +53,10 @@ android {
         }
     }
 
-    // Don't let lint block the build
     lint {
         abortOnError false
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  Dependencies
-// ═══════════════════════════════════════════════════════════════
 
 dependencies {
     implementation 'androidx.core:core-ktx:1.12.0'

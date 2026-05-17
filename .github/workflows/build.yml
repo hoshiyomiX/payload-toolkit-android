@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build APK (debug + release)
+    name: Build APK
     runs-on: ubuntu-latest
 
     steps:
@@ -42,65 +42,38 @@ jobs:
         run: |
           mkdir -p android/app/src/main/assets
           cp dist/payload_toolkit.pyz android/app/src/main/assets/
-          echo "Asset size: $(wc -c < dist/payload_toolkit.pyz) bytes"
+          echo "Asset: $(wc -c < dist/payload_toolkit.pyz) bytes"
 
-      - name: Generate CI signing key
-        run: |
-          keytool -genkeypair \
-            -keystore ci-keystore.jks \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -alias ci-key \
-            -storepass ci-store-pass \
-            -keypass ci-key-pass \
-            -dname "CN=CI, OU=CI, O=PayloadToolkit, L=CI, ST=CI, C=US"
-
-      - name: Build APKs (debug + release)
+      - name: Build debug APK
         working-directory: android
         run: |
           wget -q https://services.gradle.org/distributions/gradle-8.6-bin.zip
           unzip -qo gradle-8.6-bin.zip
-          echo "--- Building debug APK ---"
           ./gradle-8.6/bin/gradle :app:assembleDebug --no-daemon --stacktrace
-          echo "--- Building release APK ---"
-          ./gradle-8.6/bin/gradle :app:assembleRelease \
-            -PciSigning=true \
-            -PciKeystoreFile=../ci-keystore.jks \
-            -PciKeystorePass=ci-store-pass \
-            -PciKeyAlias=ci-key \
-            -PciKeyPass=ci-key-pass \
-            --no-daemon --stacktrace
 
-      - name: Locate and collect APKs
+      - name: Build release APK
+        working-directory: android
+        run: |
+          ./gradle-8.6/bin/gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Collect and upload APKs
         if: always()
         run: |
+          mkdir -p artifacts
           echo "=== Scanning for APK files ==="
-          find android/app/build -type f -name '*.apk' 2>/dev/null | while read f; do
-            size=$(wc -c < "$f")
-            echo "  FOUND: $f ($size bytes)"
+          find . -path '*/build/outputs/apk/*' -name '*.apk' -type f 2>/dev/null | while read f; do
+            cp "$f" artifacts/
+            echo "  $f ($(wc -c < "$f") bytes)"
           done
           echo ""
-          echo "=== Build output tree ==="
-          find android/app/build/outputs -type f 2>/dev/null | sort || echo "(empty)"
-          echo ""
-          # Collect APKs to a known location for upload
-          mkdir -p artifacts
-          find android/app/build -type f -name '*.apk' -exec cp {} artifacts/ \;
-          ls -la artifacts/ 2>/dev/null || echo "No APKs collected"
+          echo "=== Artifacts to upload ==="
+          ls -la artifacts/ || echo "  (none)"
 
-      - name: Upload debug APK
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: app-debug
-          path: artifacts/*debug*.apk
+          name: app-apks
+          path: artifacts/
           if-no-files-found: warn
-          retention-days: 90
-
-      - name: Upload release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-release
-          path: artifacts/*release*.apk
-          if-no-files-found: warn
-          retention-days: 7
+          retention-days: 30
