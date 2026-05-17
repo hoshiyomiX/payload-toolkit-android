@@ -41,10 +41,8 @@ jobs:
               apt-get update -qq && apt-get install -y -qq binutils > /dev/null 2>&1
               pip install --no-cache-dir pyinstaller
               pyinstaller \
-                --clean \
                 --distpath /src/dist \
                 --workpath /tmp/pyinstaller-work \
-                --specpath /src/ci \
                 /src/ci/payload_toolkit.spec
             "
 
