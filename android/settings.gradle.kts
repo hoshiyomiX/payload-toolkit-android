@@ -9,7 +9,6 @@ pluginManagement {
         }
         mavenCentral()
         gradlePluginPortal()
-        // Chaquopy plugin (com.chaquo.python:gradle) is on Maven Central.
     }
 }
 
@@ -18,9 +17,6 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven {
-            url = uri("https://chaquo.com/maven")
-        }
     }
 }
 

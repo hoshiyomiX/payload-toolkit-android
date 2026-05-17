@@ -37,7 +37,7 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
             android/.gradle
-          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle', 'android/**/*.gradle.kts', 'android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-${{ runner.os }}-
             gradle-
@@ -52,10 +52,8 @@ jobs:
       - name: List build outputs
         if: always()
         run: |
-          echo "=== Full build tree ==="
-          find android/app/build/outputs -type f 2>/dev/null || echo "No outputs found"
           echo "=== APK files ==="
-          ls -lhR android/app/build/outputs/apk/ 2>/dev/null || echo "No APK dir"
+          find android/app/build/outputs/apk -type f -name '*.apk' 2>/dev/null || echo "No APK files found"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -87,7 +85,7 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
             android/.gradle
-          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle', 'android/**/*.gradle.kts', 'android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-${{ runner.os }}-
             gradle-
@@ -95,10 +93,10 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x android/gradlew
 
-      - name: Generate debug signing key for CI
+      - name: Generate CI signing key
         run: |
           keytool -genkeypair \
-            -keystore android/ci-keystore.jks \
+            -keystore ci-keystore.jks \
             -keyalg RSA \
             -keysize 2048 \
             -validity 10000 \
@@ -107,7 +105,7 @@ jobs:
             -keypass ci-key-pass \
             -dname "CN=CI, OU=CI, O=PayloadToolkit, L=CI, ST=CI, C=US"
 
-      - name: Build release APK (unsigned)
+      - name: Build release APK (signed)
         working-directory: android
         run: |
           ./gradlew assembleRelease \
@@ -117,19 +115,12 @@ jobs:
             -PciKeyAlias=ci-key \
             -PciKeyPass=ci-key-pass \
             --stacktrace 2>&1
-        env:
-          CI_SIGNING_STORE_FILE: ../ci-keystore.jks
-          CI_SIGNING_STORE_PASSWORD: ci-store-pass
-          CI_SIGNING_KEY_ALIAS: ci-key
-          CI_SIGNING_KEY_PASSWORD: ci-key-pass
 
       - name: List build outputs
         if: always()
         run: |
-          echo "=== Full build tree ==="
-          find android/app/build/outputs -type f 2>/dev/null || echo "No outputs found"
           echo "=== APK files ==="
-          ls -lhR android/app/build/outputs/apk/ 2>/dev/null || echo "No APK dir"
+          find android/app/build/outputs/apk -type f -name '*.apk' 2>/dev/null || echo "No APK files found"
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4

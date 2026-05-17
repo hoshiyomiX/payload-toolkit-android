@@ -1,17 +1,7 @@
-buildscript {
-    repositories {
-        maven { url 'https://chaquo.com/maven' }
-    }
-    dependencies {
-        classpath 'com.chaquo.python:gradle:15.0.1'
-    }
-}
-
-plugins {
-    id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'
-}
-
+// Chaquopy plugin applied from root buildscript classpath
+// Android and Kotlin plugins applied from root buildscript classpath
+apply plugin: 'com.android.application'
+apply plugin: 'org.jetbrains.kotlin.android'
 apply plugin: 'com.chaquo.python'
 
 android {
@@ -74,9 +64,6 @@ android {
         viewBinding true
         buildConfig true
     }
-
-    // Python source is in app/src/main/python/ (Chaquopy default location).
-    // No python.srcDir() needed — Chaquopy auto-discovers from there.
 
     packaging {
         resources {
