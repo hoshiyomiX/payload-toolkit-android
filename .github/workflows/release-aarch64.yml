@@ -24,17 +24,14 @@ jobs:
         run: |
           docker run --rm --platform linux/arm64 \
             -v "$PWD:/src" \
-            -w /src/ci \
             python:3.11-slim \
-            bash -c "
-              set -ex
-              apt-get update -qq && apt-get install -y -qq binutils > /dev/null 2>&1
-              pip install --no-cache-dir pyinstaller
+            bash -c "cd /src && \
+              apt-get update -qq && apt-get install -y -qq binutils > /dev/null 2>&1 && \
+              pip install --no-cache-dir pyinstaller && \
               pyinstaller \
                 --distpath /src/dist \
                 --workpath /tmp/pyinstaller-work \
-                /src/ci/payload_toolkit.spec
-            "
+                ci/payload_toolkit.spec"
 
       - name: Verify binary
         run: |
