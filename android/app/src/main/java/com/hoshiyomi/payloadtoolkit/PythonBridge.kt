@@ -233,8 +233,9 @@ object PythonBridge {
                     diag("  This means a .so file has invalid program headers.")
                     diag("  The linker crashes during LD_PRELOAD before it can report which file.")
                     diag("  Check [ELF VALIDATION] section above for detected corrupt files.")
-                    diag("  If no corrupt files detected, the issue may be device-specific.")
-                    diag("  Next step: add small .so files (< 8KB) to patchelf skip list.")
+                    diag("  If validation shows all files pass, the corruption may be in")
+                    diag("  a field not checked (e.g. dynamic section, section headers).")
+                    diag("  v3.15: removed patchelf --set-rpath to eliminate corruption vector.")
                     diag("--- end analysis ---")
                 }
                 return InitResult(false, pythonPath, pyzPath, isBundledPython,
@@ -365,6 +366,30 @@ object PythonBridge {
      *
      * Returns null if valid, or a description of the problem.
      */
+    /**
+     * Read a little-endian unsigned 64-bit integer from the current file position.
+     * RandomAccessFile.readInt()/readLong() use BIG-endian, but ELF64 on ARM64
+     * is LITTLE-endian, so we must read bytes manually and reconstruct.
+     */
+    private fun readLeLong(raf: RandomAccessFile, bytes: Int): Long {
+        val buf = ByteArray(bytes)
+        raf.readFully(buf)
+        var result = 0L
+        for (i in buf.indices) {
+            result = result or ((buf[i].toLong() and 0xFFL) shl (8 * i))
+        }
+        return result
+    }
+
+    /**
+     * Read a little-endian unsigned 16-bit integer from the current file position.
+     */
+    private fun readLeUShort(raf: RandomAccessFile): Int {
+        val buf = ByteArray(2)
+        raf.readFully(buf)
+        return (buf[0].toInt() and 0xFF) or ((buf[1].toInt() and 0xFF) shl 8)
+    }
+
     private fun validateElfProgramHeaders(file: File): String? {
         return try {
             val raf = RandomAccessFile(file, "r")
@@ -372,25 +397,34 @@ object PythonBridge {
                 val size = raf.length()
                 if (size < 64) return "file too small for ELF header (${size} bytes)"
 
-                // Read e_phoff (offset 32, 4 bytes LE), e_phentsize (offset 54, 2 bytes LE),
-                // e_phnum (offset 56, 2 bytes LE)
+                // ELF64 header fields (all LITTLE-endian on ARM64):
+                //   e_phoff:     offset 32, 8 bytes (we read lower 4, upper 4 is 0 for small offsets)
+                //   e_phentsize: offset 54, 2 bytes
+                //   e_phnum:     offset 56, 2 bytes
+                //
+                // CRITICAL: RandomAccessFile.readInt() reads BIG-endian, which gives
+                // wrong values (e.g. 0x40000000 instead of 64).  We use readLeLong()
+                // to handle LE correctly.
                 raf.seek(32)
-                val ePhoff = Integer.toUnsignedLong(raf.readInt())
+                val ePhoff = readLeLong(raf, 8)
                 raf.seek(54)
-                val ePhentsize = Integer.toUnsignedLong(raf.readUnsignedShort())
+                val ePhentsize = readLeUShort(raf).toLong()
                 raf.seek(56)
-                val ePhnum = Integer.toUnsignedLong(raf.readUnsignedShort())
+                val ePhnum = readLeUShort(raf).toLong()
 
                 val phTableEnd = ePhoff + ePhnum * ePhentsize
                 if (phTableEnd > size) {
                     return "phdr table overflows: offset=$ePhoff + ${ePhnum}x${ePhentsize} = $phTableEnd > fileSize=$size"
                 }
 
-                // Verify we can actually read the first program header
-                if (ePhnum > 0 && ePhoff < size) {
+                // Verify we can actually read the first program header entry
+                if (ePhnum > 0L && ePhoff < size) {
                     raf.seek(ePhoff)
-                    val firstPhdr = ByteArray(ePhentsize.toInt())
-                    raf.readFully(firstPhdr)
+                    val readLen = minOf(ePhentsize.toInt(), size - ePhoff.toInt()).coerceAtLeast(0)
+                    if (readLen > 0) {
+                        val firstPhdr = ByteArray(readLen)
+                        raf.readFully(firstPhdr)
+                    }
                 }
 
                 null // valid
@@ -400,48 +434,6 @@ object PythonBridge {
         } catch (e: Exception) {
             "read error: ${e.message}"
         }
-    }
-
-    /**
-     * Validate a .so file using dlopen(RTLD_LAZY).  This is the definitive test —
-     * if the Android linker can load it, it's valid.  Returns null if OK,
-     * or an error description.
-     *
-     * Uses RTLD_LAZY so the linker doesn't immediately resolve transitive deps.
-     * We only care whether the ELF headers are parseable.
-     */
-    private fun validateSoWithDlopen(file: File): String? {
-        val handle = try {
-            System.loadLibrary(file.nameWithoutExtension)
-            // If we get here, the library is already loaded (or was loaded by a
-            // previous call).  Since System.loadLibrary doesn't return a handle,
-            // we can't dlclose it.  But success means the file is valid.
-            null // valid
-        } catch (e: UnsatisfiedLinkError) {
-            // This can mean: file not found, corrupt ELF, or missing deps.
-            // Parse the message to distinguish.
-            val msg = e.message ?: "unknown error"
-            when {
-                msg.contains("not found") -> {
-                    // Missing dependency — the file itself is likely valid,
-                    // just its deps aren't available yet.  Not our concern here.
-                    null
-                }
-                msg.contains("is 64-bit instead of 32-bit") ||
-                msg.contains("wrong ELF class") -> {
-                    "wrong architecture"
-                }
-                msg.contains("bad ELF magic") ||
-                msg.contains("not a valid ELF") -> {
-                    "invalid ELF magic"
-                }
-                msg.contains("read") || msg.contains("CHECK") -> {
-                    "linker read failure (corrupt ELF headers): $msg"
-                }
-                else -> null // unknown, assume OK
-            }
-        }
-        return handle
     }
 
     /**

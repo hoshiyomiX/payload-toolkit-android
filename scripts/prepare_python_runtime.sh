@@ -143,8 +143,9 @@ done
 #     4. Patch DT_NEEDED: versioned -> unversioned (libz.so.1 -> libz.so).
 #        The linker finds libz.so via the default namespace search path
 #        (which includes nativeLibraryDir for app processes).
-#     5. Set DT_RUNPATH=$ORIGIN (kept as belt-and-suspenders; works for
-#        the initial execve even if not for transitive dlopen).
+#     5. (REMOVED in v3.15) DT_RUNPATH=$ORIGIN was removed — LD_PRELOAD
+#        handles all transitive dep resolution on Android.  patchelf --set-rpath
+#        was a corruption risk (grew dynamic section on files with minimal padding).
 #
 #   RUNTIME (PythonBridge.kt):
 #     LD_PRELOAD with absolute paths of ALL .so files in nativeLibraryDir.
@@ -291,29 +292,6 @@ echo "    Stripped $SONAME_REMOVED DT_SONAME entries"
 echo "    Patched $NEEDED_PATCHED DT_NEEDED -> unversioned in $NEEDED_FILES files"
 echo "    Skipped $PATCHELF_SKIPPED files (< ${PATCHELF_MIN_SIZE} bytes, patchelf unsafe)"
 
-# Step 4: Set DT_RUNPATH=$ORIGIN on ALL .so files ----------------------
-# Belt-and-suspenders: ensures the linker searches the same directory as
-# the requesting library.  This works for the initial execve (confirmed)
-# and may help on some Android versions for transitive dlopen deps.
-# The PRIMARY mechanism for transitive deps is LD_PRELOAD at runtime
-# (set by PythonBridge.kt).
-echo "    Setting DT_RUNPATH=\$ORIGIN on shared libraries..."
-RPATH_COUNT=0
-RPATH_SKIPPED=0
-for so_file in "$JNI_DIR"/*.so; do
-    [ -f "$so_file" ] || continue
-    # Skip small files (same threshold as Step 3)
-    file_size=$(stat -c%s "$so_file" 2>/dev/null || echo 0)
-    if [ "$file_size" -lt "$PATCHELF_MIN_SIZE" ]; then
-        RPATH_SKIPPED=$((RPATH_SKIPPED + 1))
-        continue
-    fi
-    if patchelf --set-rpath '$ORIGIN' "$so_file" 2>/dev/null; then
-        RPATH_COUNT=$((RPATH_COUNT + 1))
-    fi
-done
-echo "    Set DT_RUNPATH on $RPATH_COUNT files (skipped $RPATH_SKIPPED small files)"
-
 # Step 4b: Post-patchelf ELF integrity validation ------------------------
 # patchelf modifies ELF sections (DYNAMIC, dynstr).  On small .so files
 # with minimal padding, this can produce a corrupt ELF that passes the
@@ -441,15 +419,6 @@ for lib in "${CRITICAL_LIBS[@]}"; do
         echo "WARNING: Critical library $lib not found in jniLibs"
     fi
 done
-
-# Verify DT_RUNPATH is set (spot check)
-echo "    Verifying DT_RUNPATH patches..."
-RUNPATH_CHECK=$(patchelf --print-rpath "$JNI_DIR/libpython3exec.so" 2>/dev/null || true)
-if [ "$RUNPATH_CHECK" != '$ORIGIN' ]; then
-    echo "    WARNING: libpython3exec.so RUNPATH is '$RUNPATH_CHECK' (expected \$ORIGIN)"
-else
-    echo "    [OK] libpython3exec.so RUNPATH=\$ORIGIN"
-fi
 
 # Final verification: scan ALL remaining .so files for ANY unresolvable
 # DT_NEEDED.  If Step 5 worked correctly, this should find ZERO issues.
