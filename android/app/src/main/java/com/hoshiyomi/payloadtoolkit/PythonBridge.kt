@@ -5,6 +5,8 @@ import android.util.Log
 import com.hoshiyomi.payloadtoolkit.BuildConfig
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.file.Files
+import java.nio.file.Path
 import java.util.zip.ZipInputStream
 
 /**
@@ -113,7 +115,7 @@ object PythonBridge {
             // libz.so.1 are stored as libz.so.1.so in the APK.  At runtime we
             // create symlinks in an app-writable directory so the linker can
             // resolve DT_NEEDED references.
-            sonameDirPath = fixSonameSymlinks(nativeLibDir)
+            sonameDirPath = fixSonameSymlinks(nativeLibDir, ctx)
 
             diag("libpython3exec.so exists: ${bundledPy.isFile}")
             diag("libpython3exec.so canExecute: ${bundledPy.isFile && bundledPy.canExecute()}")
@@ -220,8 +222,8 @@ object PythonBridge {
      *
      * Returns the soname directory path (to be prepended to LD_LIBRARY_PATH).
      */
-    private fun fixSonameSymlinks(nativeLibDir: String): String {
-        val sonameDir = File(filesDir, "python/soname")
+    private fun fixSonameSymlinks(nativeLibDir: String, context: Context): String {
+        val sonameDir = File(context.filesDir, "python/soname")
         if (!sonameDir.exists()) sonameDir.mkdirs()
 
         var created = 0
@@ -234,10 +236,9 @@ object PythonBridge {
             val link = File(sonameDir, soname)
             if (!link.exists()) {
                 try {
-                    java.nio.file.Files.createSymbolicLink(
-                        link.toPath(),
-                        file.toPath()
-                    )
+                    val targetPath: Path = file.toPath()
+                    val linkPath: Path = link.toPath()
+                    Files.createSymbolicLink(linkPath, targetPath)
                     created++
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to create symlink $soname: ${e.message}")
