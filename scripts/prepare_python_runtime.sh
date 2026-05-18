@@ -31,6 +31,17 @@ DIST_DIR="$PROJECT_ROOT/dist"
 
 mkdir -p "$JNI_DIR" "$DIST_DIR" "$STDLIB_STAGING"
 
+# -- Android system libs whitelist --------------------------------------
+# These are always available on Android (provided by bionic / platform).
+# DO NOT bundle them — the linker resolves them from the system namespace.
+# Defined once, used by DT_NEEDED patching, validation, and integrity check.
+is_android_system_lib() {
+    case "$1" in
+        libc.so|libm.so|libdl.so|libpthread.so|librt.so|liblog.so) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # -- Fetch package index -----------------------------------------------
 echo "==> Fetching Termux package index for ${ARCH}..."
 curl -sL "$REPO/dists/stable/main/binary-${ARCH}/Packages.gz" | gzip -d > "$STAGING/Packages"
@@ -244,9 +255,7 @@ for so_file in "$JNI_DIR"/*.so; do
     while IFS= read -r needed; do
         [ -z "$needed" ] && continue
         # Skip system libs that Android provides
-        case "$needed" in
-            libc.so|libm.so|libdl.so|libpthread.so|librt.so) continue ;;
-        esac
+        is_android_system_lib "$needed" && continue
         # Only patch versioned names (e.g. libz.so.1, libcrypto.so.3)
         # Unversioned deps are checked by the validation sweep below
         if [[ "$needed" == *.so.* ]]; then
@@ -308,9 +317,7 @@ while [ "$CHANGED" -eq 1 ]; do
         while IFS= read -r needed; do
             [ -z "$needed" ] && continue
             # Skip system libs that Android's bionic always provides
-            case "$needed" in
-                libc.so|libm.so|libdl.so|libpthread.so|librt.so) continue ;;
-            esac
+            is_android_system_lib "$needed" && continue
             # Check BOTH versioned and unversioned deps
             # Versioned: libfoo.so.1 -> check if libfoo.so exists
             # Unversioned: libfoo.so -> check if libfoo.so exists
@@ -372,9 +379,7 @@ for so_file in "$JNI_DIR"/*.so; do
     [ -f "$so_file" ] || continue
     while IFS= read -r needed; do
         [ -z "$needed" ] && continue
-        case "$needed" in
-            libc.so|libm.so|libdl.so|libpthread.so|librt.so) continue ;;
-        esac
+        is_android_system_lib "$needed" && continue
         # Check BOTH versioned and unversioned deps
         if [[ "$needed" == *.so.* ]]; then
             unversioned="$(echo "$needed" | sed 's/\.so\..*/.so/')"
