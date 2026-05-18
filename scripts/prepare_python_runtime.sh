@@ -293,51 +293,21 @@ echo "    Patched $NEEDED_PATCHED DT_NEEDED -> unversioned in $NEEDED_FILES file
 echo "    Skipped $PATCHELF_SKIPPED files (< ${PATCHELF_MIN_SIZE} bytes, patchelf unsafe)"
 
 # Step 4b: Post-patchelf ELF integrity validation ------------------------
-# patchelf modifies ELF sections (DYNAMIC, dynstr).  On small .so files
-# with minimal padding, this can produce a corrupt ELF that passes the
+# patchelf modifies ELF sections (DYNAMIC, dynstr).  On .so files with
+# minimal section padding, this can produce a corrupt ELF that passes the
 # patchelf exit code but fails at runtime with bionic linker CHECK errors.
-# Validate every file here so the build fails BEFORE packaging into the APK.
+#
+# The critical check is PT_LOAD segment bounds: each LOAD segment's
+# p_offset + p_filesz must be <= file size.  If a segment extends past EOF,
+# the bionic linker's Load() fails with "Load CHECK 'did_read_' failed".
+#
+# Uses Python struct module for correct little-endian binary parsing.
 echo "    Validating ELF integrity after patchelf..."
-ELF_INVALID=0
-for so_file in "$JNI_DIR"/*.so; do
-    [ -f "$so_file" ] || continue
-    name="$(basename "$so_file")"
-    size=$(stat -c%s "$so_file" 2>/dev/null || echo 0)
-    # Check 1: ELF magic bytes (0x7f 'E' 'L' 'F')
-    magic=$(od -A n -t x1 -N 4 "$so_file" 2>/dev/null | tr -d ' ')
-    if [ "$magic" != "7f454c46" ]; then
-        echo "      INVALID: $name (magic=$magic, size=$size bytes)"
-        ELF_INVALID=$((ELF_INVALID + 1))
-        continue
-    fi
-    # Check 2: patchelf can still parse the dynamic section
-    if ! patchelf --print-needed "$so_file" >/dev/null 2>&1; then
-        echo "      CORRUPT: $name (patchelf cannot read dynamic section)"
-        ELF_INVALID=$((ELF_INVALID + 1))
-        continue
-    fi
-    # Check 3: program header table doesn't exceed file size
-    # e_phoff at offset 32 (4 bytes LE), e_phnum at offset 56 (2 bytes LE)
-    # e_phentsize at offset 54 (2 bytes LE)
-    e_phoff=$(od -A n -t d4 -j 32 -N 4 "$so_file" 2>/dev/null | tr -d ' ')
-    e_phnum=$(od -A n -t d2 -j 56 -N 2 "$so_file" 2>/dev/null | tr -d ' ')
-    e_phentsize=$(od -A n -t d2 -j 54 -N 2 "$so_file" 2>/dev/null | tr -d ' ')
-    ph_end=$((e_phoff + e_phnum * e_phentsize))
-    if [ "$ph_end" -gt "$size" ]; then
-        echo "      INVALID: $name (phdr table end=$ph_end > file size=$size)"
-        ELF_INVALID=$((ELF_INVALID + 1))
-        continue
-    fi
-done
-if [ "$ELF_INVALID" -gt 0 ]; then
-    echo "    ERROR: $ELF_INVALID files have invalid ELF after patchelf!"
-    echo "    These files will crash the Android linker at runtime."
-    echo "    Possible cause: patchelf corrupted small .so files."
-    echo "    Fix: add the file to a patchelf-skip list or exclude it."
+if ! python3 "$SCRIPT_DIR/validate_elf.py" "$JNI_DIR"; then
+    echo "    ERROR: ELF validation failed! Aborting build."
     rm -rf "$STAGING"
     exit 1
 fi
-echo "    [OK] All .so files pass ELF integrity check"
 
 # Step 5: Validate DT_NEEDED — remove .so with unresolvable deps --------
 # After patching, scan ALL .so files. Any that still have a DT_NEEDED

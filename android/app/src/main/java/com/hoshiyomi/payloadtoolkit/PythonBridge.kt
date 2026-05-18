@@ -357,16 +357,6 @@ object PythonBridge {
     }
 
     /**
-     * Deep ELF validation — reads program headers to detect files that will
-     * crash the bionic linker with "Load CHECK 'did_read_' failed".
-     *
-     * This error occurs when e_phoff + e_phnum * e_phentsize > file size,
-     * meaning the program header table extends past the end of the file.
-     * patchelf can produce these corrupt files on small .so binaries.
-     *
-     * Returns null if valid, or a description of the problem.
-     */
-    /**
      * Read a little-endian unsigned 64-bit integer from the current file position.
      * RandomAccessFile.readInt()/readLong() use BIG-endian, but ELF64 on ARM64
      * is LITTLE-endian, so we must read bytes manually and reconstruct.
@@ -382,6 +372,18 @@ object PythonBridge {
     }
 
     /**
+     * Read a little-endian unsigned 32-bit integer from the current file position.
+     */
+    private fun readLeUInt(raf: RandomAccessFile): Int {
+        val buf = ByteArray(4)
+        raf.readFully(buf)
+        return (buf[0].toInt() and 0xFF) or
+               ((buf[1].toInt() and 0xFF) shl 8) or
+               ((buf[2].toInt() and 0xFF) shl 16) or
+               ((buf[3].toInt() and 0xFF) shl 24)
+    }
+
+    /**
      * Read a little-endian unsigned 16-bit integer from the current file position.
      */
     private fun readLeUShort(raf: RandomAccessFile): Int {
@@ -390,6 +392,25 @@ object PythonBridge {
         return (buf[0].toInt() and 0xFF) or ((buf[1].toInt() and 0xFF) shl 8)
     }
 
+    /**
+     * Deep ELF validation — reads program headers and validates all PT_LOAD
+     * and PT_DYNAMIC segments.  Catches files that will crash the bionic
+     * linker with "Load CHECK 'did_read_' failed".
+     *
+     * The bionic linker's Load() function mmaps the file and reads each
+     * PT_LOAD segment's data (p_offset .. p_offset+p_filesz).  If a segment
+     * extends past the file, the read fails and CHECK('did_read_') aborts.
+     *
+     * patchelf can corrupt segments by growing the dynamic section past
+     * the end of the file on binaries with minimal section padding.
+     *
+     * ELF64 Phdr layout (56 bytes each):
+     *   0: p_type(4)  p_flags(4)
+     *   8: p_offset(8)  p_vaddr(8)  p_paddr(8)
+     *  32: p_filesz(8)  p_memsz(8)  p_align(8)
+     *
+     * Returns null if valid, or a description of the problem.
+     */
     private fun validateElfProgramHeaders(file: File): String? {
         return try {
             val raf = RandomAccessFile(file, "r")
@@ -398,13 +419,9 @@ object PythonBridge {
                 if (size < 64) return "file too small for ELF header (${size} bytes)"
 
                 // ELF64 header fields (all LITTLE-endian on ARM64):
-                //   e_phoff:     offset 32, 8 bytes (we read lower 4, upper 4 is 0 for small offsets)
+                //   e_phoff:     offset 32, 8 bytes
                 //   e_phentsize: offset 54, 2 bytes
                 //   e_phnum:     offset 56, 2 bytes
-                //
-                // CRITICAL: RandomAccessFile.readInt() reads BIG-endian, which gives
-                // wrong values (e.g. 0x40000000 instead of 64).  We use readLeLong()
-                // to handle LE correctly.
                 raf.seek(32)
                 val ePhoff = readLeLong(raf, 8)
                 raf.seek(54)
@@ -412,18 +429,33 @@ object PythonBridge {
                 raf.seek(56)
                 val ePhnum = readLeUShort(raf).toLong()
 
+                // Check 1: phdr table itself fits in file
                 val phTableEnd = ePhoff + ePhnum * ePhentsize
                 if (phTableEnd > size) {
                     return "phdr table overflows: offset=$ePhoff + ${ePhnum}x${ePhentsize} = $phTableEnd > fileSize=$size"
                 }
 
-                // Verify we can actually read the first program header entry
-                if (ePhnum > 0L && ePhoff < size) {
-                    raf.seek(ePhoff)
-                    val readLen = minOf(ePhentsize.toInt(), (size - ePhoff).toInt()).coerceAtLeast(0)
-                    if (readLen > 0) {
-                        val firstPhdr = ByteArray(readLen)
-                        raf.readFully(firstPhdr)
+                // Check 2: each PT_LOAD and PT_DYNAMIC segment fits in file
+                for (i in 0 until ePhnum.toInt()) {
+                    val entryOff = ePhoff + i * ePhentsize
+
+                    // Read p_type (Elf64_Word, 4 bytes at offset 0 within Phdr)
+                    raf.seek(entryOff)
+                    val pType = readLeUInt(raf)
+
+                    // For PT_LOAD (1) and PT_DYNAMIC (2): validate segment bounds
+                    if (pType == 1 || pType == 2) {
+                        // p_offset at offset 8, p_filesz at offset 32 (Elf64, 8 bytes each)
+                        raf.seek(entryOff + 8)
+                        val pOffset = readLeLong(raf, 8)
+                        raf.seek(entryOff + 32)
+                        val pFilesz = readLeLong(raf, 8)
+
+                        val segEnd = pOffset + pFilesz
+                        if (segEnd > size) {
+                            val typeName = if (pType == 1) "PT_LOAD" else "PT_DYNAMIC"
+                            return "$typeName[$i] segment overflows: offset=$pOffset + filesz=$pFilesz = $segEnd > fileSize=$size"
+                        }
                     }
                 }
 
