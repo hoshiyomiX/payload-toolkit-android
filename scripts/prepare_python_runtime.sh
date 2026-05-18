@@ -103,6 +103,28 @@ find "$TERMUX_PREFIX/lib" -maxdepth 1 -name "*.so*" \( -type f -o -type l \) | w
     cp -a "$f" "$JNI_DIR/"
 done
 
+# ── Resolve all symlinks to real file copies ──────────────────────────
+# APK is a ZIP file — ZIP cannot store symlinks.  Any symlink we cp -a'd
+# above will be lost when Gradle packages jniLibs into the APK.  The
+# Android dynamic linker resolves SONAMEs (e.g. libz.so.1) at dlopen
+# time, so those files MUST exist as real entries in the APK.
+#
+# Strategy: after the cp -a pass, find every symlink in $JNI_DIR and
+# replace it with a hard copy of its target (which is always another .so
+# in the same directory).
+echo "    Resolving symlinks..."
+SYMLINK_COUNT=0
+find "$JNI_DIR" -maxdepth 1 -type l | while read -r link; do
+    target=$(readlink -f "$link")
+    if [ -f "$target" ]; then
+        # Remove symlink, copy the real file
+        rm -f "$link"
+        cp -a "$target" "$link"
+        SYMLINK_COUNT=$((SYMLINK_COUNT + 1))
+    fi
+done
+echo "    Symlinks resolved (replaced with real copies)"
+
 # C extension modules from lib-dynload/ — these have names like
 # _hashlib.cpython-313-aarch64-linux-android.so (not "lib*" prefix,
 # but Android still extracts all .so files from jniLibs)
