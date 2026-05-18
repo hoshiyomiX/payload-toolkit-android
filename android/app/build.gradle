@@ -14,8 +14,8 @@ android {
         applicationId 'com.hoshiyomi.payloadtoolkit'
         minSdk 26
         targetSdk 34
-        versionCode 25
-        versionName '3.17.1'
+        versionCode 26
+        versionName '3.18.0'
 
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }

@@ -509,12 +509,92 @@ MANIFEST="$DIST_DIR/native-libs-manifest.txt"
 MANIFEST_SIZE=$(wc -c < "$MANIFEST")
 echo "    $MANIFEST ($MANIFEST_SIZE bytes, $JNI_COUNT entries)"
 
+# -- 4. Compile JNI bridge (libpybridge.so) --------------------------
+# Compiles pybridge.c into a shared library that uses dlopen() to load
+# libpython3.13.so and call Py_Main() directly — no execve(), no LD_PRELOAD,
+# no linker namespace issues.
+#
+# Uses zig cc as cross-compiler (supports Android target, no NDK needed).
+# zig produces a thin .so (~15 KB) with no dependencies beyond libc/libdl.
+echo ""
+echo "==> Compiling JNI bridge (libpybridge.so)..."
+
+ZIG_VERSION="0.13.0"
+ZIG_CACHE="$PROJECT_ROOT/.zig-cache"
+ZIG_BIN="$ZIG_CACHE/zig-$ZIG_VERSION/zig"
+
+if [ ! -x "$ZIG_BIN" ]; then
+    echo "    Downloading zig $ZIG_VERSION (cross-compiler for Android)..."
+    mkdir -p "$ZIG_CACHE"
+    ZIG_ARCHIVE="$ZIG_CACHE/zig-linux-x86_64-$ZIG_VERSION.tar.xz"
+    wget -q "https://ziglang.org/builds/zig-linux-x86_64-$ZIG_VERSION.tar.xz" -O "$ZIG_ARCHIVE" || {
+        echo "    FAIL: Could not download zig"
+        rm -rf "$STAGING"
+        exit 1
+    }
+    tar xf "$ZIG_ARCHIVE" -C "$ZIG_CACHE"
+    rm -f "$ZIG_ARCHIVE"
+fi
+
+# Find JDK include path for jni.h
+JAVA_INCLUDE="${JAVA_HOME:-/usr/lib/jvm/default-java}/include"
+JAVA_INCLUDE_LINUX="$JAVA_INCLUDE/linux"
+if [ ! -f "$JAVA_INCLUDE/jni.h" ]; then
+    # Try common JDK paths
+    for jdk in "$JAVA_HOME" /usr/lib/jvm/java-17-openjdk-amd64 /usr/lib/jvm/default-java; do
+        if [ -f "$jdk/include/jni.h" ]; then
+            JAVA_INCLUDE="$jdk/include"
+            JAVA_INCLUDE_LINUX="$jdk/include/linux"
+            break
+        fi
+    done
+fi
+if [ ! -f "$JAVA_INCLUDE/jni.h" ]; then
+    echo "    WARNING: jni.h not found at $JAVA_INCLUDE/jni.h"
+    echo "    JNI bridge compilation may fail."
+fi
+
+BRIDGE_SRC="$SCRIPT_DIR/jni/pybridge.c"
+BRIDGE_OUT="$JNI_DIR/libpybridge.so"
+
+if [ -f "$BRIDGE_SRC" ]; then
+    echo "    Compiling: $BRIDGE_SRC -> $BRIDGE_OUT"
+    set +e  # Allow zig to fail gracefully (use exec fallback)
+    "$ZIG_BIN" cc \
+        -target aarch64-linux-android26 \
+        -shared -fPIC \
+        -Wl,--no-undefined \
+        -I"$JAVA_INCLUDE" \
+        -I"$JAVA_INCLUDE_LINUX" \
+        -O2 \
+        -o "$BRIDGE_OUT" \
+        "$BRIDGE_SRC" 2>&1
+    ZIG_EXIT=$?
+    set -e
+    if [ $ZIG_EXIT -eq 0 ] && [ -f "$BRIDGE_OUT" ]; then
+        BRIDGE_SIZE=$(stat -c%s "$BRIDGE_OUT" 2>/dev/null || echo 0)
+        echo "    [OK] libpybridge.so compiled ($BRIDGE_SIZE bytes)"
+    else
+        echo "    WARNING: JNI bridge compilation failed"
+        echo "    Python will use exec fallback (LD_PRELOAD + LD_LIBRARY_PATH)"
+        # Remove any partial output
+        rm -f "$BRIDGE_OUT"
+    fi
+else
+    echo "    WARNING: $BRIDGE_SRC not found — skipping JNI bridge"
+fi
+
+# Recount after bridge compilation
+JNI_COUNT=$(find "$JNI_DIR" -maxdepth 1 -name "*.so" | wc -l)
+JNI_SIZE=$(du -sh "$JNI_DIR" | cut -f1)
+
 # -- Summary ------------------------------------------------------------
 echo ""
 echo "==========================================="
 echo "  jniLibs (native libs):"
-echo "    Files:  $JNI_COUNT"
+echo "    Files:  $JNI_COUNT (includes libpybridge.so)"
 echo "    Size:   $JNI_SIZE"
+echo "    JNI bridge: $([ -f "$BRIDGE_OUT" ] && echo 'YES' || echo 'NO (exec fallback)')"
 echo "  python-stdlib.zip (.py only):"
 echo "    Files:  $STDLIB_COUNT"
 echo "    Size:   $STDLIB_SIZE"

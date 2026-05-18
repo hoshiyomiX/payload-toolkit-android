@@ -11,11 +11,11 @@ import java.util.zip.ZipInputStream
 /**
  * PythonBridge — Manages Python runtime initialization and .pyz execution.
  *
- * Architecture (v5 — jniLibs + stdlib asset + build manifest):
+ * Architecture (v6 — JNI embedding + jniLibs + stdlib asset + build manifest):
  *
  *   On the BUILD machine (CI):
  *     Termux Python 3.13 packages → split into three outputs:
- *       1. jniLibs/arm64-v8a/         — .so libs + python binary
+ *       1. jniLibs/arm64-v8a/         — .so libs + python binary + libpybridge.so
  *       2. assets/python-stdlib.zip   — .py stdlib files
  *       3. assets/native-libs-manifest.txt — .so dependency map
  *
@@ -26,11 +26,9 @@ import java.util.zip.ZipInputStream
  *   At RUNTIME (first launch):
  *     1. Extract python-stdlib.zip + manifest from assets → app-internal storage
  *     2. Cross-check nativeLibraryDir against build manifest
- *     3. Execute nativeLibraryDir/libpython3exec.so with:
- *        - LD_PRELOAD      = Python binary's direct deps only (from manifest)
- *        - LD_LIBRARY_PATH = nativeLibraryDir (for transitive deps via dlopen)
- *        - PYTHONHOME      = extracted stdlib
- *        - PYTHONPATH       = nativeLibraryDir
+ *     3. Try JNI mode (dlopen libpython3.13.so → Py_Main)
+ *        - No execve(), no LD_PRELOAD, no linker namespace issues
+ *     4. Fallback: execve libpython3exec.so with LD_PRELOAD + LD_LIBRARY_PATH
  */
 object PythonBridge {
 
@@ -63,7 +61,15 @@ object PythonBridge {
     private var pyzPath: String? = null
     private var stdlibDir: String? = null
     private var isBundledPython = false
+    private var nativeLibDir: String? = null
     private var execDirectDeps: List<String> = emptyList()
+
+    /** JNI bridge instance (null if libpybridge.so not available). */
+    private var pyBridge: PyBridge? = null
+
+    /** Whether to use JNI mode (dlopen) vs exec mode (ProcessBuilder). */
+    private var useJniMode = false
+
     private val initLock = Any()
 
     data class InitResult(
@@ -87,8 +93,9 @@ object PythonBridge {
      * Initialize: extract assets and prepare Python runtime.
      *
      * Priority:
-     *   1. Bundled Python (nativeLibraryDir from jniLibs + stdlib from assets)
-     *   2. System Python (Termux or other)
+     *   1. Bundled Python via JNI (dlopen libpython3.13.so in-process)
+     *   2. Bundled Python via exec (LD_PRELOAD + LD_LIBRARY_PATH fallback)
+     *   3. System Python (Termux or other)
      */
     fun ensureInitialized(context: Context?): InitResult {
         if (initialized) return InitResult(true, pythonPath, pyzPath, isBundledPython)
@@ -114,13 +121,13 @@ object PythonBridge {
             diag("[OK] .pyz: $pyzPath (${File(pyzPath).length()} bytes)")
 
             // Step 2: Try bundled Python from nativeLibraryDir (jniLibs)
-            val nativeLibDir = ctx.applicationInfo.nativeLibraryDir
-            val bundledPy = File(nativeLibDir, BUNDLED_PYTHON_LIB)
+            nativeLibDir = ctx.applicationInfo.nativeLibraryDir
+            val bundledPy = File(nativeLibDir!!, BUNDLED_PYTHON_LIB)
 
             diag("nativeLibraryDir: $nativeLibDir")
 
             // -- Full .so inventory --
-            val nativeDir = File(nativeLibDir)
+            val nativeDir = File(nativeLibDir!!)
             val soFiles = if (nativeDir.isDirectory) {
                 nativeDir.listFiles()?.filter { it.name.endsWith(".so") }?.sortedBy { it.name }
             } else null
@@ -136,7 +143,6 @@ object PythonBridge {
                 }
             } else {
                 diag("[OK] .so count: ${soFiles.size}")
-                // Log every .so with size — this makes finding missing/extra files instant
                 val totalSize = soFiles.sumOf { it.length() }
                 diag("[OK] .so total size: ${formatBytes(totalSize)}")
                 diag("--- .so inventory ---")
@@ -145,6 +151,10 @@ object PythonBridge {
                 }
                 diag("--- end inventory ---")
             }
+
+            // -- Check for libpybridge.so (JNI mode) --
+            val bridgeSo = File(nativeLibDir!!, "libpybridge.so")
+            diag("libpybridge.so exists: ${bridgeSo.isFile}")
 
             // -- ELF header validation --
             diag("libpython3exec.so exists: ${bundledPy.isFile}")
@@ -155,9 +165,16 @@ object PythonBridge {
                 diag("libpython3exec.so size: ${formatBytes(bundledPy.length())}")
             }
 
+            // Check libpython3.13.so (needed for JNI mode)
+            val pythonSo = File(nativeLibDir!!, "libpython3.13.so")
+            diag("libpython3.13.so exists: ${pythonSo.isFile}")
+            if (pythonSo.isFile) {
+                diag("libpython3.13.so size: ${formatBytes(pythonSo.length())}")
+            }
+
             // -- Manifest cross-check --
             if (soFiles != null && soFiles.isNotEmpty()) {
-                val manifestIssues = crossCheckManifest(ctx, nativeLibDir, soFiles)
+                val manifestIssues = crossCheckManifest(ctx, nativeLibDir!!, soFiles)
                 if (manifestIssues.isNotEmpty()) {
                     diag("--- MANIFEST MISMATCH ---")
                     manifestIssues.forEach { diag("  $it") }
@@ -167,7 +184,7 @@ object PythonBridge {
                 }
             }
 
-            // Extract Python executable's direct dependencies for targeted LD_PRELOAD
+            // Extract Python executable's direct dependencies for exec fallback
             execDirectDeps = parseExecDeps(ctx)
             if (execDirectDeps.isNotEmpty()) {
                 diag("[Manifest] $BUNDLED_PYTHON_LIB direct deps: ${execDirectDeps.joinToString(", ")}")
@@ -175,7 +192,7 @@ object PythonBridge {
                 diag("[Manifest] WARNING: no DT_NEEDED found for $BUNDLED_PYTHON_LIB in manifest")
             }
 
-            if (bundledPy.isFile) {
+            if (bundledPy.isFile || pythonSo.isFile) {
                 diag("Attempting bundled Python initialization...")
 
                 val stdlibAssets = try {
@@ -200,13 +217,28 @@ object PythonBridge {
                 diag("Bundled Python not found — checking if APK was built with jniLibs")
             }
 
-            // Step 3: Fallback to system Python
+            // Step 3: Initialize JNI bridge (preferred mode)
+            if (isBundledPython && stdlibDir != null) {
+                pyBridge = PyBridge.getInstance()
+                if (pyBridge != null) {
+                    useJniMode = true
+                    diag("[OK] JNI mode: will use dlopen(libpython3.13.so) + Py_Main")
+                    diag("[JNI] No execve(), no LD_PRELOAD, no LD_LIBRARY_PATH needed")
+                } else {
+                    diag("[JNI] libpybridge.so not available, using exec fallback")
+                    diag("[JNI] ${PyBridge.loadError}")
+                    useJniMode = false
+                }
+            }
+
+            // Step 4: Fallback to system Python
             if (pythonPath == null) {
                 diag("Trying system Python fallback...")
                 val found = findSystemPython()
                 if (found != null) {
                     pythonPath = found
                     isBundledPython = false
+                    useJniMode = false
                     diag("[OK] System Python: $pythonPath")
                 } else {
                     diag("FAILED: No system Python found either")
@@ -221,37 +253,51 @@ object PythonBridge {
                     diagnostics = diagText)
             }
 
-            // Step 4: Smoke test
+            // Step 5: Smoke test
             val verifyError = verifySetup()
             if (verifyError != null) {
                 Log.w(TAG, "Verify failed: $verifyError")
                 diag("Verify failed: $verifyError")
-                // Parse linker error for actionable diagnostics
-                val parsedError = parseLinkerError(verifyError)
-                if (parsedError != null) {
-                    diag("--- LINKER ERROR ANALYSIS ---")
-                    diag("  Problem .so:  ${parsedError.first}")
-                    diag("  Missing dep:  ${parsedError.second}")
-                    diag("  Fix: add the missing .so to prepare_python_runtime.sh PACKAGES,")
-                    diag("       or exclude the problem .so if not needed.")
-                    diag("--- end analysis ---")
-                } else if (verifyError.contains("did_read_") || verifyError.contains("linker_phdr")
-                    || verifyError.contains("CHECK") || verifyError.contains("SIGABRT")) {
-                    diag("--- LINKER CRASH ANALYSIS ---")
-                    diag("  Error type: bionic linker CHECK failure (ELF corruption)")
-                    diag("  This means a .so file has invalid program headers.")
-                    diag("  The linker crashes during LD_PRELOAD before it can report which file.")
-                    diag("  Check [ELF VALIDATION] section above for detected corrupt files.")
-                    diag("  v3.17.1: If this persists, uninstall old APK and reinstall.")
-                    diag("  If using a fresh install, check [LD_PRELOAD] diagnostics above.")
-                    diag("--- end analysis ---")
+                // If JNI mode failed, try switching to exec mode
+                if (useJniMode) {
+                    diag("[JNI] Smoke test failed, falling back to exec mode")
+                    useJniMode = false
+                    pyBridge = null
+                    val retryError = verifySetup()
+                    if (retryError != null) {
+                        diag("Exec fallback also failed: $retryError")
+                        // Parse linker error for actionable diagnostics
+                        parseAndDiagnoseError(retryError)
+                        return InitResult(false, pythonPath, pyzPath, isBundledPython,
+                            retryError, diagnosticLog.toString())
+                    }
+                    diag("[OK] Exec fallback smoke test passed")
+                } else {
+                    parseAndDiagnoseError(verifyError)
+                    return InitResult(false, pythonPath, pyzPath, isBundledPython,
+                        verifyError, diagnosticLog.toString())
                 }
-                return InitResult(false, pythonPath, pyzPath, isBundledPython,
-                    verifyError, diagnosticLog.toString())
             }
 
             initialized = true
             return InitResult(true, pythonPath, pyzPath, isBundledPython)
+        }
+    }
+
+    private fun parseAndDiagnoseError(error: String) {
+        val parsedError = parseLinkerError(error)
+        if (parsedError != null) {
+            diag("--- LINKER ERROR ANALYSIS ---")
+            diag("  Problem .so:  ${parsedError.first}")
+            diag("  Missing dep:  ${parsedError.second}")
+            diag("  Fix: add the missing .so to prepare_python_runtime.sh PACKAGES,")
+            diag("       or exclude the problem .so if not needed.")
+            diag("--- end analysis ---")
+        } else if (error.contains("did_read_") || error.contains("linker_phdr")
+            || error.contains("CHECK") || error.contains("SIGABRT")) {
+            diag("--- LINKER CRASH ANALYSIS ---")
+            diag("  Error type: bionic linker CHECK failure (ELF corruption)")
+            diag("--- end analysis ---")
         }
     }
 
@@ -346,13 +392,6 @@ object PythonBridge {
     //  Diagnostics helpers
     // ═══════════════════════════════════════════════════════════════
 
-    /**
-     * Resolve a DT_NEEDED library name to an unversioned filename that
-     * exists in jniLibs.  Handles:
-     *   - System libs → null (provided by Android bionic)
-     *   - Versioned names → unversioned (libz.so.1 → libz.so)
-     *   - Already unversioned → pass through
-     */
     private fun resolveLibName(needed: String): String? {
         if (SYSTEM_LIBS.contains(needed)) return null
         return if (needed.contains(".so.")) {
@@ -362,12 +401,6 @@ object PythonBridge {
         }
     }
 
-    /**
-     * Parse the native-libs manifest to extract DT_NEEDED entries for
-     * libpython3exec.so.  These are the Python binary's direct dependencies
-     * that must be preloaded (LD_LIBRARY_PATH is not searched for execve()
-     * on Android 8.0+ due to linker namespace restrictions).
-     */
     private fun parseExecDeps(context: Context): List<String> {
         return try {
             val content = context.assets.open(MANIFEST_ASSET_NAME)
@@ -391,10 +424,6 @@ object PythonBridge {
         }
     }
 
-    /**
-     * Validate that a file starts with the ELF magic bytes (\x7fELF).
-     * Catches cases where the file is corrupt or not actually an ELF binary.
-     */
     private fun validateElfHeader(file: File): Boolean {
         return try {
             val stream = file.inputStream()
@@ -409,11 +438,6 @@ object PythonBridge {
         }
     }
 
-    /**
-     * Read a little-endian unsigned 64-bit integer from the current file position.
-     * RandomAccessFile.readInt()/readLong() use BIG-endian, but ELF64 on ARM64
-     * is LITTLE-endian, so we must read bytes manually and reconstruct.
-     */
     private fun readLeLong(raf: RandomAccessFile, bytes: Int): Long {
         val buf = ByteArray(bytes)
         raf.readFully(buf)
@@ -424,9 +448,6 @@ object PythonBridge {
         return result
     }
 
-    /**
-     * Read a little-endian unsigned 32-bit integer from the current file position.
-     */
     private fun readLeUInt(raf: RandomAccessFile): Int {
         val buf = ByteArray(4)
         raf.readFully(buf)
@@ -436,74 +457,37 @@ object PythonBridge {
                ((buf[3].toInt() and 0xFF) shl 24)
     }
 
-    /**
-     * Read a little-endian unsigned 16-bit integer from the current file position.
-     */
     private fun readLeUShort(raf: RandomAccessFile): Int {
         val buf = ByteArray(2)
         raf.readFully(buf)
         return (buf[0].toInt() and 0xFF) or ((buf[1].toInt() and 0xFF) shl 8)
     }
 
-    /**
-     * Deep ELF validation — reads program headers and validates all PT_LOAD
-     * and PT_DYNAMIC segments.  Catches files that will crash the bionic
-     * linker with "Load CHECK 'did_read_' failed".
-     *
-     * The bionic linker's Load() function mmaps the file and reads each
-     * PT_LOAD segment's data (p_offset .. p_offset+p_filesz).  If a segment
-     * extends past the file, the read fails and CHECK('did_read_') aborts.
-     *
-     * patchelf can corrupt segments by growing the dynamic section past
-     * the end of the file on binaries with minimal section padding.
-     *
-     * ELF64 Phdr layout (56 bytes each):
-     *   0: p_type(4)  p_flags(4)
-     *   8: p_offset(8)  p_vaddr(8)  p_paddr(8)
-     *  32: p_filesz(8)  p_memsz(8)  p_align(8)
-     *
-     * Returns null if valid, or a description of the problem.
-     */
     private fun validateElfProgramHeaders(file: File): String? {
         return try {
             val raf = RandomAccessFile(file, "r")
             try {
                 val size = raf.length()
                 if (size < 64) return "file too small for ELF header (${size} bytes)"
-
-                // ELF64 header fields (all LITTLE-endian on ARM64):
-                //   e_phoff:     offset 32, 8 bytes
-                //   e_phentsize: offset 54, 2 bytes
-                //   e_phnum:     offset 56, 2 bytes
                 raf.seek(32)
                 val ePhoff = readLeLong(raf, 8)
                 raf.seek(54)
                 val ePhentsize = readLeUShort(raf).toLong()
                 raf.seek(56)
                 val ePhnum = readLeUShort(raf).toLong()
-
-                // Check 1: phdr table itself fits in file
                 val phTableEnd = ePhoff + ePhnum * ePhentsize
                 if (phTableEnd > size) {
                     return "phdr table overflows: offset=$ePhoff + ${ePhnum}x${ePhentsize} = $phTableEnd > fileSize=$size"
                 }
-
-                // Check 2: each PT_LOAD and PT_DYNAMIC segment fits in file
                 for (i in 0 until ePhnum.toInt()) {
                     val entryOff = ePhoff + i * ePhentsize
-
-                    // Read p_type (Elf64_Word, 4 bytes at offset 0 within Phdr)
                     raf.seek(entryOff)
                     val pType = readLeUInt(raf)
-
-                    // For PT_LOAD (1) and PT_DYNAMIC (2): validate segment bounds
                     if (pType == 1 || pType == 2) {
-                        // p_offset at offset 8, p_filesz at offset 32 (Elf64, 8 bytes each)
                         raf.seek(entryOff + 8)
                         val pOffset = readLeLong(raf, 8)
                         raf.seek(entryOff + 32)
                         val pFilesz = readLeLong(raf, 8)
-
                         val segEnd = pOffset + pFilesz
                         if (segEnd > size) {
                             val typeName = if (pType == 1) "PT_LOAD" else "PT_DYNAMIC"
@@ -511,8 +495,7 @@ object PythonBridge {
                         }
                     }
                 }
-
-                null // valid
+                null
             } finally {
                 raf.close()
             }
@@ -521,14 +504,6 @@ object PythonBridge {
         }
     }
 
-    /**
-     * Cross-check nativeLibraryDir .so files against the build-time manifest.
-     * Detects: missing files (expected by build, not on device),
-     *          extra files (on device but not in build),
-     *          size mismatches (file corrupted or wrong version).
-     *
-     * Returns a list of issue descriptions (empty = all OK).
-     */
     private fun crossCheckManifest(
         context: Context,
         nativeLibDir: String,
@@ -539,10 +514,7 @@ object PythonBridge {
             issues.add("WARNING: manifest asset not found — cannot cross-check")
             return issues
         }
-
         val deviceNames = deviceSoFiles.associate { it.name to it.length() }
-
-        // Check for files in manifest but missing on device
         for ((name, expectedSize) in manifestMap) {
             val deviceFile = deviceNames[name]
             if (deviceFile == null) {
@@ -551,27 +523,19 @@ object PythonBridge {
                 issues.add("SIZE MISMATCH: $name (device=${formatBytes(deviceFile)}, build=${formatBytes(expectedSize)})")
             }
         }
-
-        // Check for files on device but not in manifest (stale from old APK?)
         for (name in deviceNames.keys) {
             if (name !in manifestMap) {
                 issues.add("EXTRA on device: $name (not in build manifest — stale from old APK?)")
             }
         }
-
         return issues
     }
 
-    /**
-     * Parse the build-time manifest from assets.
-     * Returns a map of filename -> expected size, or null if manifest not found.
-     */
     private fun parseManifest(context: Context): Map<String, Long>? {
         return try {
             val content = context.assets.open(MANIFEST_ASSET_NAME)
                 .bufferedReader().readText()
             val map = mutableMapOf<String, Long>()
-            // Parse lines like: libfoo.so | 12345 | libz.so,libpython3.13.so
             for (line in content.lines()) {
                 if (line.startsWith("#") || line.isBlank()) continue
                 val parts = line.split(" | ")
@@ -589,47 +553,26 @@ object PythonBridge {
         }
     }
 
-    /**
-     * Parse Android linker error messages to extract actionable information.
-     *
-     * Recognized patterns:
-     *   - "CANNOT LINK EXECUTABLE ...: library \"libfoo.so\" not found: needed by libbar.so"
-     *   - "dlopen failed: library \"libfoo.so\" not found"
-     *   - "dlopen failed: cannot find \"libfoo.so\" from verneed[N] in DT_NEEDED list"
-     *
-     * Returns Pair(problemSo, missingDep) or null if not a recognizable linker error.
-     */
     private fun parseLinkerError(error: String): Pair<String, String>? {
-        // Pattern 1: "library "X" not found: needed by Y" or "needed by .../Y"
         val neededByPattern = Regex(
             """library\s+"([^"]+)"\s+not\s+found.*?needed\s+by\s+\S*/(\S+)"""
         )
         val m1 = neededByPattern.find(error)
-        if (m1 != null) {
-            return Pair(m1.groupValues[2], m1.groupValues[1])
-        }
+        if (m1 != null) return Pair(m1.groupValues[2], m1.groupValues[1])
 
-        // Pattern 2: "dlopen failed: library "X" not found"
         val dlopenPattern = Regex("""dlopen failed:\s+library\s+"([^"]+)"\s+not\s+found""")
         val m2 = dlopenPattern.find(error)
-        if (m2 != null) {
-            // We know what's missing but not who needs it
-            return Pair("(unknown requester)", m2.groupValues[1])
-        }
+        if (m2 != null) return Pair("(unknown requester)", m2.groupValues[1])
 
-        // Pattern 3: "cannot find "X" from verneed" (Android-specific)
         val verneedPattern = Regex(
             """cannot find\s+"([^"]+)"\s+from\s+verneed\[\d+\].*?for\s+(\S+)"""
         )
         val m3 = verneedPattern.find(error)
-        if (m3 != null) {
-            return Pair(m3.groupValues[2], m3.groupValues[1])
-        }
+        if (m3 != null) return Pair(m3.groupValues[2], m3.groupValues[1])
 
         return null
     }
 
-    /** Format bytes in human-readable form. */
     private fun formatBytes(bytes: Long): String {
         return when {
             bytes < 1024 -> "$bytes B"
@@ -659,22 +602,53 @@ object PythonBridge {
     //  Execution
     // ═══════════════════════════════════════════════════════════════
 
+    /**
+     * Smoke test: run Python with --version to verify it works.
+     * Uses JNI mode if available, falls back to exec.
+     */
     private fun verifySetup(): String? {
-        val py = pythonPath ?: return "No Python path"
         val pyz = pyzPath ?: return "No .pyz path"
 
+        if (isBundledPython) {
+            if (stdlibDir == null) return "No stdlib dir"
+            val libDir = File(stdlibDir!!, "lib/python3.13")
+            if (!libDir.isDirectory) return "Stdlib lib dir missing: ${libDir.absolutePath}"
+            val pyCount = libDir.listFiles()?.count { it.name.endsWith(".py") } ?: 0
+            if (pyCount < 10) return "Stdlib too small: $pyCount .py files in $libDir"
+        }
+
+        // Try JNI mode first
+        if (useJniMode && pyBridge != null && nativeLibDir != null) {
+            return verifyViaJni(pyz)
+        }
+
+        // Fallback: exec mode
+        val py = pythonPath ?: return "No Python path"
+        return verifyViaExec(py, pyz)
+    }
+
+    private fun verifyViaJni(pyz: String): String? {
+        Log.d(TAG, "Verify (JNI): $pyz --version")
+        val result = pyBridge!!.runPython(
+            libDir = nativeLibDir!!,
+            pyzPath = pyz,
+            stdlibDir = stdlibDir!!,
+            args = listOf("--version")
+        )
+        diag("[JNI verify] exit=${result.exitCode} output=${result.output.take(200)}")
+        if (result.success && result.output.isNotEmpty()) {
+            Log.d(TAG, "JNI verify OK: ${result.output}")
+            return null
+        }
+        return "JNI verify exit ${result.exitCode}: ${result.output}${result.error?.let { " ($it)" } ?: ""}"
+    }
+
+    private fun verifyViaExec(py: String, pyz: String): String? {
         if (isBundledPython) {
             val pyFile = File(py)
             if (!pyFile.exists()) return "Bundled Python not found: $py"
             if (!pyFile.canExecute()) {
                 Log.w(TAG, "Bundled Python exists but may not be executable: $py")
-                Log.w(TAG, "nativeLibraryDir: ${pyFile.parent}")
-            }
-            if (stdlibDir != null) {
-                val libDir = File(stdlibDir!!, "lib/python3.13")
-                if (!libDir.isDirectory) return "Stdlib lib dir missing: ${libDir.absolutePath}"
-                val pyCount = libDir.listFiles()?.count { it.name.endsWith(".py") } ?: 0
-                if (pyCount < 10) return "Stdlib too small: $pyCount .py files in $libDir"
             }
         }
 
@@ -682,22 +656,13 @@ object PythonBridge {
             val pb = ProcessBuilder(py, pyz, "--version")
                 .redirectErrorStream(true)
             configureEnvironment(pb)
-            Log.d(TAG, "Running: $py $pyz --version")
+            Log.d(TAG, "Verify (exec): $py $pyz --version")
             val process = pb.start()
             val rawOutput = process.inputStream.bufferedReader().readText().trim()
             val exitCode = process.waitFor()
-            // Filter non-fatal bionic linker warnings (CANNOT LINK EXECUTABLE)
-            // that appear when LD_PRELOAD resolves deps the default namespace
-            // can't find for execve()'d binaries.  These are harmless noise.
-            val output = if (isBundledPython) {
-                rawOutput.lineSequence()
-                    .filterNot { it.contains("CANNOT LINK EXECUTABLE") }
-                    .joinToString("\n").trim()
-            } else {
-                rawOutput
-            }
+            val output = filterLinkerWarnings(rawOutput)
             if (exitCode == 0 && output.isNotEmpty()) {
-                Log.d(TAG, "Verify OK: $output")
+                Log.d(TAG, "Exec verify OK: $output")
                 null
             } else {
                 "Python exit $exitCode: $output"
@@ -708,40 +673,57 @@ object PythonBridge {
         }
     }
 
+    /**
+     * Execute the .pyz file with the given arguments.
+     *
+     * JNI mode (preferred): dlopen + Py_Main — no subprocess, no linker issues.
+     * Exec mode (fallback): ProcessBuilder + LD_PRELOAD — may show linker warnings.
+     */
     fun executePyz(args: List<String>): ExecResult {
-        val py = pythonPath ?: return ExecResult("", "Python not initialized", -1, 0)
         val pyz = pyzPath ?: return ExecResult("", ".pyz not found", -1, 0)
 
+        // JNI mode: run Python in-process via dlopen
+        if (useJniMode && pyBridge != null && nativeLibDir != null && stdlibDir != null) {
+            return executeViaJni(pyz, args)
+        }
+
+        // Exec mode: run Python as subprocess
+        val py = pythonPath ?: return ExecResult("", "Python not initialized", -1, 0)
+        return executeViaExec(py, pyz, args)
+    }
+
+    private fun executeViaJni(pyz: String, args: List<String>): ExecResult {
+        val startTime = System.currentTimeMillis()
+        Log.d(TAG, "Exec (JNI): $pyz ${args.joinToString(" ")}")
+        val result = pyBridge!!.runPython(
+            libDir = nativeLibDir!!,
+            pyzPath = pyz,
+            stdlibDir = stdlibDir!!,
+            args = args
+        )
+        val duration = System.currentTimeMillis() - startTime
+
+        if (!result.success) {
+            Log.w(TAG, "JNI exec exit ${result.exitCode}: ${result.output.take(500)}")
+        }
+        return ExecResult(result.output, result.error, result.exitCode, duration)
+    }
+
+    private fun executeViaExec(py: String, pyz: String, args: List<String>): ExecResult {
         val startTime = System.currentTimeMillis()
         return try {
             val command = mutableListOf(py, pyz)
             command.addAll(args)
-
             val pb = ProcessBuilder(command).redirectErrorStream(true)
             configureEnvironment(pb)
-
-            Log.d(TAG, "Exec: ${command.joinToString(" ")}")
+            Log.d(TAG, "Exec (exec): ${command.joinToString(" ")}")
             val process = pb.start()
             val rawOutput = process.inputStream.bufferedReader().readText()
             val exitCode = process.waitFor()
             val duration = System.currentTimeMillis() - startTime
-
-            // Filter known non-fatal linker warnings from stderr.
-            // When execve() runs libpython3exec.so, bionic's default namespace
-            // doesn't search LD_LIBRARY_PATH for direct deps.  LD_PRELOAD
-            // provides the lib, but bionic still prints a CANNOT LINK warning
-            // to stderr before proceeding.  Since we use redirectErrorStream(true),
-            // this noise appears in the combined output.  Strip it for clean UI.
-            val output = if (isBundledPython && exitCode == 0) {
-                rawOutput.lineSequence()
-                    .filterNot { it.contains("CANNOT LINK EXECUTABLE") }
-                    .joinToString("\n")
-            } else {
-                rawOutput
-            }
-
+            val output = filterLinkerWarnings(rawOutput)
             if (exitCode != 0) {
-                Log.w(TAG, "Python exit $exitCode, output: ${output.take(500)}")
+                Log.w(TAG, "Exec exit $exitCode, output: ${output.take(500)}")
             }
             ExecResult(output, null, exitCode, duration)
         } catch (e: Exception) {
@@ -751,77 +733,42 @@ object PythonBridge {
         }
     }
 
-    /**
-     * @deprecated Use [executePyz] instead. Kept for backward compatibility.
-     */
+    /** @deprecated Use [executePyz] instead. */
     fun executePyzWithTermuxEnv(args: List<String>): ExecResult = executePyz(args)
 
     // ═══════════════════════════════════════════════════════════════
-    //  Environment configuration
+    //  Environment configuration (exec mode only)
     // ═══════════════════════════════════════════════════════════════
 
-    /**
-     * Configure ProcessBuilder environment for the current Python source.
-     *
-     * Bundled Python (from jniLibs):
-     *   LD_PRELOAD = direct deps of Python binary only (from build manifest).
-     *       -> Bionic's default namespace doesn't search LD_LIBRARY_PATH for
-     *          execve()'d binaries.  Direct DT_NEEDED deps must be preloaded.
-     *   LD_LIBRARY_PATH = nativeLibraryDir
-     *       -> Handles transitive deps loaded via dlopen() from C extensions.
-     *   PYTHONHOME = stdlibDir
-     *   PYTHONPATH = nativeLibraryDir
-     *
-     * System Python (Termux fallback):
-     *   Standard Termux environment variables.
-     */
     private fun configureEnvironment(pb: ProcessBuilder) {
         val env = pb.environment()
 
         if (isBundledPython && stdlibDir != null) {
-            val nativeLibDir = pythonPath?.let { File(it).parent } ?: return
-            env["LD_LIBRARY_PATH"] = nativeLibDir
+            val libDir = nativeLibDir ?: pythonPath?.let { File(it).parent } ?: return
+            env["LD_LIBRARY_PATH"] = libDir
             env["PYTHONHOME"] = stdlibDir!!
-            env["PYTHONPATH"] = nativeLibDir
+            env["PYTHONPATH"] = libDir
             env["TMPDIR"] = File(stdlibDir!!, "../tmp").absolutePath
+            env["PYTHONUNBUFFERED"] = "1"
 
-            // v3.17.1: Targeted LD_PRELOAD of Python binary's DIRECT dependencies only.
-            //
-            // Why not preload ALL libs?  Preloading all 74 .so files caused persistent
-            // "Load CHECK 'did_read_' failed" crashes — some files have subtle ELF
-            // corruption not detectable from header validation.
-            //
-            // Why not LD_LIBRARY_PATH alone?  On Android 8.0+ (API 26+), the linker's
-            // default namespace does NOT search LD_LIBRARY_PATH for execve()'d
-            // executables.  Direct DT_NEEDED deps of the executable must be findable
-            // through the default namespace, which only includes the system lib paths
-            // and the app's nativeLibraryDir (for loaded shared libs, not exec'd files).
-            //
-            // Solution: preload only the Python binary's direct dependencies
-            // (typically 2-4 files: libpython3.13.so, libandroid-support.so, etc.)
-            // These are large, well-formed libraries from Termux — no corruption risk.
-            // Transitive deps (loaded via dlopen) are handled by LD_LIBRARY_PATH.
             val preloadLibs = mutableListOf<File>()
             for (dep in execDirectDeps) {
                 val resolved = resolveLibName(dep)
-                if (resolved == null) continue // system lib
-                val depFile = File(nativeLibDir, resolved)
+                if (resolved == null) continue
+                val depFile = File(libDir, resolved)
                 if (depFile.isFile) {
                     preloadLibs.add(depFile)
                 } else {
-                    diag("[WARN] Direct dep not in nativeLibraryDir: $dep → $resolved")
+                    diag("[WARN] Direct dep not in nativeLibraryDir: $dep -> $resolved")
                 }
             }
             if (preloadLibs.isNotEmpty()) {
                 val preloadString = preloadLibs.joinToString(":", transform = { it.absolutePath })
                 env["LD_PRELOAD"] = preloadString
-                val totalPreloadSize = preloadLibs.sumOf { it.length() }
-                diag("[LD_PRELOAD] ${preloadLibs.size} direct deps of $BUNDLED_PYTHON_LIB (${formatBytes(totalPreloadSize)}):")
-                preloadLibs.forEach { diag("  preload: ${it.name} (${formatBytes(it.length())})") }
+                diag("[LD_PRELOAD] ${preloadLibs.size} direct deps (${preloadLibs.sumOf { it.length() } bytes)")
             } else {
-                diag("[LD_PRELOAD] no direct deps to preload — relying on LD_LIBRARY_PATH only")
+                diag("[LD_PRELOAD] no direct deps to preload")
             }
-            diag("[LD_LIBRARY_PATH] $nativeLibDir")
         } else {
             val py = pythonPath ?: return
             if (py.contains("termux")) {
@@ -834,6 +781,14 @@ object PythonBridge {
         }
     }
 
+    /** Filter non-fatal CANNOT LINK EXECUTABLE warnings from exec mode output. */
+    private fun filterLinkerWarnings(rawOutput: String): String {
+        if (!isBundledPython) return rawOutput
+        return rawOutput.lineSequence()
+            .filterNot { it.contains("CANNOT LINK EXECUTABLE") }
+            .joinToString("\n")
+    }
+
     // ═══════════════════════════════════════════════════════════════
     //  Public accessors
     // ═══════════════════════════════════════════════════════════════
@@ -843,31 +798,21 @@ object PythonBridge {
     fun getPyzPath(): String? = pyzPath
     fun isBundled(): Boolean = isBundledPython
 
+    /** Whether JNI mode (dlopen) is active vs exec mode (ProcessBuilder). */
+    fun isJniMode(): Boolean = useJniMode
+
     /** Get the last initialization diagnostic log (for UI display). */
     fun getDiagnostics(): String = diagnosticLog.toString()
 
     fun checkDependencies(): String {
-        val py = pythonPath ?: return "ERROR: Python not initialized"
-        val pyz = pyzPath ?: return "ERROR: .pyz not extracted from assets"
+        if (!initialized) return "ERROR: Python not initialized"
 
-        return try {
-            val pb = ProcessBuilder(py, pyz, "--check-deps")
-                .redirectErrorStream(true)
-            configureEnvironment(pb)
-            val process = pb.start()
-            val rawOutput = process.inputStream.bufferedReader().readText().trim()
-            process.waitFor()
-            // Filter non-fatal linker warnings (same as executePyz)
-            val output = if (isBundledPython) {
-                rawOutput.lineSequence()
-                    .filterNot { it.contains("CANNOT LINK EXECUTABLE") }
-                    .joinToString("\n").trim()
-            } else {
-                rawOutput
-            }
-            output.ifEmpty { "No output (exit ${process.exitValue()})" }
-        } catch (e: Exception) {
-            "Failed: ${e.message}"
+        // Use JNI or exec based on current mode
+        val result = executePyz(listOf("--check-deps"))
+        return if (result.error != null) {
+            "Failed: ${result.error}"
+        } else {
+            result.output.ifEmpty { "No output (exit ${result.exitCode})" }
         }
     }
 
