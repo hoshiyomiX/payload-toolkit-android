@@ -5,8 +5,6 @@ import android.util.Log
 import com.hoshiyomi.payloadtoolkit.BuildConfig
 import java.io.File
 import java.io.FileOutputStream
-import java.nio.file.Files
-import java.nio.file.Path
 import java.util.zip.ZipInputStream
 
 /**
@@ -210,15 +208,23 @@ object PythonBridge {
     /**
      * AGP only packages files ending with ".so" from jniLibs.
      * Versioned SONAME files like libz.so.1 were renamed to libz.so.1.so
-     * by prepare_python_runtime.sh so AGP would include them.
+     * by prepare_python_runtime.sh so AGP would include them in the APK.
      *
      * At runtime, the linker resolves DT_NEEDED (e.g. "libz.so.1") by
-     * searching LD_LIBRARY_PATH directories.  We create symlinks in an
-     * app-writable directory (filesDir/python/soname/) from SONAME names
-     * to the .so.so files, and prepend this directory to LD_LIBRARY_PATH.
+     * searching LD_LIBRARY_PATH directories.  We COPY the .so.so files
+     * into an app-writable directory (filesDir/python/soname/) with their
+     * correct SONAME names, and prepend this directory to LD_LIBRARY_PATH.
+     *
+     * We use copies instead of symlinks because:
+     *   1. SELinux may block cross-context symlink traversal
+     *      (app_data_file -> app_lib_file)
+     *   2. LD_LIBRARY_PATH is unreliable on modern Android for dlopen()
+     *      transitive dependencies; the linker namespace may not include
+     *      paths added at runtime via LD_LIBRARY_PATH.
+     *   3. Copies are always accessible regardless of linker config.
      *
      * Example:
-     *   filesDir/python/soname/libz.so.1 -> nativeLibraryDir/libz.so.1.so
+     *   filesDir/python/soname/libz.so.1  (copy of nativeLibraryDir/libz.so.1.so)
      *
      * Returns the soname directory path (to be prepended to LD_LIBRARY_PATH).
      */
@@ -228,26 +234,34 @@ object PythonBridge {
 
         var created = 0
         val nativeDir = File(nativeLibDir)
-        nativeDir.listFiles()?.filter {
+        val soSoFiles = nativeDir.listFiles()?.filter {
             it.isFile && it.name.endsWith(".so.so")
-        }?.forEach { file ->
+        }
+        diag("SONAME .so.so files in nativeLibraryDir: ${soSoFiles?.size ?: 0}")
+
+        soSoFiles?.forEach { file ->
             // libz.so.1.so -> remove trailing .so -> libz.so.1
             val soname = file.name.removeSuffix(".so")
-            val link = File(sonameDir, soname)
-            if (!link.exists()) {
+            val target = File(sonameDir, soname)
+            if (!target.exists() || target.length() != file.length()) {
                 try {
-                    val targetPath: Path = file.toPath()
-                    val linkPath: Path = link.toPath()
-                    Files.createSymbolicLink(linkPath, targetPath)
+                    file.copyTo(target, overwrite = true)
+                    // Make readable/executable for the linker
+                    target.setReadable(true, false)
+                    target.setExecutable(true, false)
                     created++
                 } catch (e: Exception) {
-                    Log.w(TAG, "Failed to create symlink $soname: ${e.message}")
+                    Log.w(TAG, "Failed to copy SONAME file $soname: ${e.message}")
+                    diag("WARN: Failed to copy SONAME $soname: ${e.message}")
                 }
             }
         }
         if (created > 0) {
-            Log.d(TAG, "Created $created SONAME symlinks in ${sonameDir.absolutePath}")
-            diag("Created $created SONAME symlinks in ${sonameDir.absolutePath}")
+            val sonameList = sonameDir.listFiles()?.map { it.name }?.sorted()
+            Log.d(TAG, "Created $created SONAME copies in ${sonameDir.absolutePath}")
+            diag("Created $created SONAME copies: ${sonameList?.joinToString(", ")}")
+        } else if (soSoFiles.isNullOrEmpty()) {
+            diag("WARNING: No .so.so files found — SONAME resolution disabled")
         }
         return sonameDir.absolutePath
     }

@@ -8,12 +8,16 @@ with Python 3.8+, including Android (Termux), Linux, macOS, and Windows.
 No cross-compilation, no NDK, no Docker needed. Pure Python bytecode
 in a PEP 441 zipapp format.
 
+IMPORTANT: The .pyz is built with ZIP_STORED (no compression) to avoid
+a runtime dependency on libz.so.1 on Android, where the dynamic linker
+cannot always resolve transitive shared library dependencies.
+
 Usage:
     python3 scripts/build_pyz.py              # Build to dist/payload_toolkit.pyz
     python3 scripts/build_pyz.py -o out.pyz   # Custom output path
 
 Output:
-    dist/payload_toolkit.pyz  (~35 KB, compressed)
+    dist/payload_toolkit.pyz  (~80 KB, uncompressed)
 """
 import os
 import sys
@@ -252,11 +256,16 @@ def build_pyz(output_path=DEFAULT_OUTPUT):
             f.write(ENTRY_POINT)
 
         # Create the zipapp (PEP 441)
+        # NOTE: compressed=False (ZIP_STORED) is CRITICAL for Android.
+        # The bundled Termux Python may not have libz.so.1 available at
+        # runtime, so zipimport cannot decompress zlib-compressed zipapps.
+        # An uncompressed .pyz is slightly larger (~80 KB vs ~36 KB) but
+        # loads without any shared library dependencies beyond the stdlib.
         zipapp.create_archive(
             source=tmpdir,
             target=output_path,
             interpreter="/usr/bin/env python3",
-            compressed=True,
+            compressed=False,
         )
 
     # Verify and report
@@ -272,10 +281,18 @@ def build_pyz(output_path=DEFAULT_OUTPUT):
         names = zf.namelist()
 
     print()
+    # Verify compression method (must be ZIP_STORED = 0)
+    compressed_entries = 0
+    for info in zf.infolist():
+        if info.compress_type != 0:
+            compressed_entries += 1
+    if compressed_entries > 0:
+        print("WARNING: %d entries are compressed (should be 0 for Android)" % compressed_entries)
+
     print("  Built:   %s" % output_path)
     print("  Size:    %d bytes (%.1f KB)" % (size, size / 1024))
     print("  SHA256:  %s" % sha)
-    print("  Entries: %d" % len(names))
+    print("  Entries: %d (all ZIP_STORED)" % len(names))
     print("  Runs on: any platform with Python 3.8+")
     print()
     print("  Deploy to Android:")
