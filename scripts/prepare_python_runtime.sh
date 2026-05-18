@@ -103,7 +103,7 @@ find "$TERMUX_PREFIX/lib" -maxdepth 1 -name "*.so*" \( -type f -o -type l \) | w
     cp -a "$f" "$JNI_DIR/"
 done
 
-# -- Resolve symlinks and fix SONAME extensions -------------------------
+# -- Resolve symlinks and flatten SONAME references ----------------------
 # APK is a ZIP file -- ZIP cannot store symlinks.  Any symlink we cp -a'd
 # above will be lost when Gradle packages jniLibs into the APK.
 #
@@ -111,27 +111,34 @@ done
 # whose filename ENDS with .so.  SONAME files like libz.so.1 don't match
 # and are silently dropped from the APK.
 #
-# Strategy:
-#   1. Replace symlinks with real copies of their targets.
-#   2. For every file matching *.so.* (e.g. libz.so.1.3.2 or libz.so.1),
-#      create a copy with .so appended (e.g. libz.so.1.3.2.so) so AGP
-#      packages it.
-#   3. Use patchelf to rewrite DT_NEEDED entries in ALL .so files so
-#      they reference the .so.so filenames instead of the original SONAMEs.
-#   4. Set DT_RUNPATH=$ORIGIN on ALL .so files so the Android linker
-#      searches the same directory for transitive dependencies.
-#      This is critical because Android linker namespaces (API 26+) may
-#      NOT include nativeLibraryDir in search paths for dlopen() calls.
-#      $ORIGIN resolves to the directory containing the requesting library.
+# V3.9 STRATEGY -- "unversioned + LD_PRELOAD":
 #
-# Why DT_RUNPATH=$ORIGIN instead of LD_LIBRARY_PATH?
-#   Android linker namespaces (API 26+) define which paths dlopen() searches.
-#   LD_LIBRARY_PATH is often IGNORED for transitive dlopen() calls in the
-#   "default" namespace.  DT_RUNPATH is embedded in the ELF file itself,
-#   so it always takes effect regardless of namespace configuration.
-#   $ORIGIN expands to the directory of the requesting .so at load time,
-#   so all libraries find their dependencies in nativeLibraryDir.
-echo "    Resolving symlinks and fixing SONAME extensions..."
+#   The problem:  DT_RUNPATH=$ORIGIN does NOT work for transitive deps
+#   loaded via dlopen() on Android.  When Python dlopens zlib.so, and
+#   zlib.so needs libz.so.1, the linker ignores $ORIGIN and cannot find
+#   libz.so.1.so (or even libz.so.1).  This was confirmed on device.
+#
+#   The fix has TWO parts (build-time + runtime):
+#
+#   BUILD-TIME (this script):
+#     1. Replace symlinks with real copies of their targets.
+#     2. Ensure unversioned .so exists for every versioned library:
+#        libz.so.1.3.2 + libz.so.1 -> we keep libz.so (unversioned).
+#        If the Termux package lacks the dev symlink, create it.
+#     3. Remove DT_SONAME from ALL .so files (patchelf --remove-soname).
+#        Prevents the linker from registering libs under versioned names
+#        that AGP dropped from the APK.
+#     4. Patch DT_NEEDED: versioned -> unversioned (libz.so.1 -> libz.so).
+#        The linker finds libz.so via the default namespace search path
+#        (which includes nativeLibraryDir for app processes).
+#     5. Set DT_RUNPATH=$ORIGIN (kept as belt-and-suspenders; works for
+#        the initial execve even if not for transitive dlopen).
+#
+#   RUNTIME (PythonBridge.kt):
+#     LD_PRELOAD with absolute paths of ALL .so files in nativeLibraryDir.
+#     This preloads everything at process start.  When Python later dlopens
+#     zlib.so and it needs libz.so, the lib is already in the loaded map.
+echo "    Resolving symlinks and flattening SONAME references..."
 
 # Step 1: Replace symlinks with real copies
 find "$JNI_DIR" -maxdepth 1 -type l | while read -r link; do
@@ -142,13 +149,27 @@ find "$JNI_DIR" -maxdepth 1 -type l | while read -r link; do
     fi
 done
 
-# Step 2: Copy *.so.* files to *.so.*.so (append .so so AGP packages them)
-SONAME_COUNT=0
+# Step 2: Ensure unversioned .so exists for every versioned library
+# Termux packages usually provide libfoo.so -> libfoo.so.1 -> libfoo.so.1.0
+# After symlink resolution above, we have real copies of all three.
+# AGP drops libfoo.so.1 and libfoo.so.1.0 (don't end with .so).
+# We KEEP libfoo.so (ends with .so, AGP packages it).
+# If a package somehow lacks the unversioned symlink, create it:
+UNVERSIONED_COUNT=0
 find "$JNI_DIR" -maxdepth 1 -name '*.so.*' -type f | while read -r f; do
-    cp -a "$f" "${f}.so"
-    SONAME_COUNT=$((SONAME_COUNT + 1))
+    # Extract base name: libfoo.so.1.0 -> libfoo.so
+    base="$(echo "$f" | sed 's/\.so\..*//')"
+    if [ ! -f "$base" ]; then
+        cp -a "$f" "$base"
+        UNVERSIONED_COUNT=$((UNVERSIONED_COUNT + 1))
+    fi
 done
-echo "    SONAME extensions fixed ($SONAME_COUNT files)"
+echo "    Created $UNVERSIONED_COUNT unversioned symlinks"
+
+# Step 2b: Delete versioned .so.* files (AGP would drop them anyway).
+# Keeping them in the git repo just wastes space and causes confusion.
+find "$JNI_DIR" -maxdepth 1 -name '*.so.*' -type f -delete 2>/dev/null || true
+echo "    Removed versioned .so.* files (AGP drops them)"
 
 # C extension modules from lib-dynload/ -- these have names like
 # _hashlib.cpython-313-aarch64-linux-android.so (not "lib*" prefix,
@@ -167,18 +188,24 @@ find "$JNI_DIR" -maxdepth 1 -name "xxlimited*.so" -delete 2>/dev/null || true
 find "$JNI_DIR" -maxdepth 1 -name "xxsubtype*.so" -delete 2>/dev/null || true
 find "$JNI_DIR" -maxdepth 1 -name "_ctypes_test*.so" -delete 2>/dev/null || true
 
-# Step 3: Install patchelf and rewrite DT_NEEDED entries ----------------
-# patchelf modifies ELF DT_NEEDED entries so libraries reference the
-# .so.so filenames that AGP actually packages.
+# Step 3: Strip DT_SONAME + rewrite DT_NEEDED ---------------------------
+# patchelf modifies ELF headers so libraries use unversioned names only.
 #
 # IMPORTANT: This must run AFTER all .so files are in jniLibs (including
 # lib-dynload extension modules) so they ALL get patched.
 #
-# Example: binascii.so has DT_NEEDED: libz.so.1
-#   -> patchelf changes it to DT_NEEDED: libz.so.1.so
-#   -> linker searches nativeLibraryDir (same dir as binascii.so)
-#   -> finds libz.so.1.so -> success!
-echo "    Patching DT_NEEDED entries with patchelf..."
+# Why strip DT_SONAME?
+#   libz.so (copy of libz.so.1.3.2) has DT_SONAME: libz.so.1.3.2
+#   If we don't strip it, the linker registers libz.so under the name
+#   "libz.so.1.3.2" internally.  When another library's DT_NEEDED says
+#   "libz.so", the linker won't find it because it's registered as
+#   "libz.so.1.3.2".  Stripping SONAME makes the linker use filename.
+#
+# Why patch DT_NEEDED to unversioned?
+#   zlib.cpython-313-*.so has DT_NEEDED: libz.so.1
+#   libz.so.1 is NOT in the APK (AGP dropped it).
+#   We patch to libz.so, which IS in the APK.
+echo "    Patching ELF headers with patchelf..."
 if ! command -v patchelf &>/dev/null; then
     echo "    Installing patchelf..."
     sudo apt-get install -y -qq patchelf 2>/dev/null || {
@@ -188,46 +215,48 @@ if ! command -v patchelf &>/dev/null; then
     }
 fi
 
-PATCHED_COUNT=0
-PATCHED_FILES=0
+SONAME_REMOVED=0
+NEEDED_PATCHED=0
+NEEDED_FILES=0
 for so_file in "$JNI_DIR"/*.so; do
     [ -f "$so_file" ] || continue
     file_patched=0
-    # Get all DT_NEEDED entries for this library
+
+    # Strip DT_SONAME so linker uses filename for dedup
+    if patchelf --remove-soname "$so_file" 2>/dev/null; then
+        SONAME_REMOVED=$((SONAME_REMOVED + 1))
+    fi
+
+    # Patch versioned DT_NEEDED -> unversioned
     while IFS= read -r needed; do
         [ -z "$needed" ] && continue
-        # Only patch versioned libs (*.so.X) where we have a .so.so copy
-        # Skip system libs (libc.so, libm.so, libdl.so, etc.) that the
-        # Android runtime provides.
+        # Skip system libs that Android provides
         case "$needed" in
             libc.so|libm.so|libdl.so|libpthread.so|librt.so) continue ;;
         esac
-        if [[ "$needed" == *.so.* ]] && [[ -f "$JNI_DIR/${needed}.so" ]]; then
-            patchelf --replace-needed "$needed" "${needed}.so" "$so_file" 2>/dev/null && \
-                PATCHED_COUNT=$((PATCHED_COUNT + 1))
-            file_patched=1
+        # Only patch versioned names (e.g. libz.so.1, libcrypto.so.3)
+        if [[ "$needed" == *.so.* ]]; then
+            # Derive unversioned name: libz.so.1 -> libz.so
+            unversioned="$(echo "$needed" | sed 's/\.so\..*/.so/')"
+            if [ -f "$JNI_DIR/$unversioned" ]; then
+                if patchelf --replace-needed "$needed" "$unversioned" "$so_file" 2>/dev/null; then
+                    NEEDED_PATCHED=$((NEEDED_PATCHED + 1))
+                    file_patched=1
+                fi
+            fi
         fi
     done < <(patchelf --print-needed "$so_file" 2>/dev/null)
-    [ "$file_patched" -eq 1 ] && PATCHED_FILES=$((PATCHED_FILES + 1))
+    [ "$file_patched" -eq 1 ] && NEEDED_FILES=$((NEEDED_FILES + 1))
 done
-echo "    Patched $PATCHED_COUNT DT_NEEDED entries in $PATCHED_FILES files"
+echo "    Stripped $SONAME_REMOVED DT_SONAME entries"
+echo "    Patched $NEEDED_PATCHED DT_NEEDED -> unversioned in $NEEDED_FILES files"
 
 # Step 4: Set DT_RUNPATH=$ORIGIN on ALL .so files ----------------------
-# This ensures the Android linker searches the same directory as the
-# requesting library when resolving transitive dependencies.
-#
-# Example chain:
-#   Python dlopens zlib.cpython-313-*.so (from nativeLibraryDir)
-#   -> zlib.so has DT_NEEDED: libz.so.1.so (rewritten by Step 3)
-#   -> zlib.so has DT_RUNPATH: $ORIGIN
-#   -> linker searches $ORIGIN (= nativeLibraryDir) for libz.so.1.so
-#   -> found! (AGP packaged it because filename ends with .so)
-#
-# This also fixes the main executable:
-#   libpython3exec.so has DT_NEEDED: libandroid-support.so
-#   -> libpython3exec.so has DT_RUNPATH: $ORIGIN
-#   -> linker searches nativeLibraryDir for libandroid-support.so
-#   -> found!
+# Belt-and-suspenders: ensures the linker searches the same directory as
+# the requesting library.  This works for the initial execve (confirmed)
+# and may help on some Android versions for transitive dlopen deps.
+# The PRIMARY mechanism for transitive deps is LD_PRELOAD at runtime
+# (set by PythonBridge.kt).
 echo "    Setting DT_RUNPATH=\$ORIGIN on all .so files..."
 RPATH_COUNT=0
 for so_file in "$JNI_DIR"/*.so; do
@@ -274,17 +303,25 @@ elif [ -n "$EXT_CHECK" ]; then
     echo "    [OK] zlib.so RUNPATH=\$ORIGIN"
 fi
 
-# Verify DT_NEEDED was patched correctly (spot check)
-echo "    Verifying DT_NEEDED patches..."
-SPOT_CHECK=$(patchelf --print-needed "$JNI_DIR/libpython3exec.so" 2>/dev/null | grep -c '\.so\.' || true)
-if [ "$SPOT_CHECK" -gt 0 ]; then
-    echo "    WARNING: libpython3exec.so still has $SPOT_CHECK versioned DT_NEEDED entries (unpatched?)"
-    patchelf --print-needed "$JNI_DIR/libpython3exec.so" 2>/dev/null | grep '\.so\.' | while read -r line; do
-        echo "      UNPATCHED: $line"
+# Verify no versioned DT_NEEDED remain (all should be unversioned now)
+echo "    Verifying DT_NEEDED patches (all unversioned)..."
+VERSIONED_CHECK=$(patchelf --print-needed "$JNI_DIR/zlib.cpython-313-aarch64-linux-android.so" 2>/dev/null | grep -c '\.so\.' || true)
+if [ "$VERSIONED_CHECK" -gt 0 ]; then
+    echo "    WARNING: zlib.so still has $VERSIONED_CHECK versioned DT_NEEDED entries:"
+    patchelf --print-needed "$JNI_DIR/zlib.cpython-313-aarch64-linux-android.so" 2>/dev/null | grep '\.so\.' | while read -r line; do
+        echo "      VERSIONED: $line"
     done
+else
+    echo "    [OK] zlib.so: all DT_NEEDED are unversioned"
+fi
+SONAME_CHECK=$(patchelf --print-soname "$JNI_DIR/libz.so" 2>/dev/null || true)
+if [ -n "$SONAME_CHECK" ]; then
+    echo "    WARNING: libz.so still has DT_SONAME: $SONAME_CHECK (should be empty)"
+else
+    echo "    [OK] libz.so: DT_SONAME stripped"
 fi
 
-JNI_COUNT=$(find "$JNI_DIR" -maxdepth 1 -name "*.so" -o -name "*.so.*" | wc -l)
+JNI_COUNT=$(find "$JNI_DIR" -maxdepth 1 -name "*.so" | wc -l)
 JNI_SIZE=$(du -sh "$JNI_DIR" | cut -f1)
 echo "    $JNI_COUNT native libraries ($JNI_SIZE)"
 

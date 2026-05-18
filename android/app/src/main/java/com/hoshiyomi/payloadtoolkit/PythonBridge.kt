@@ -413,9 +413,13 @@ object PythonBridge {
      * Configure ProcessBuilder environment for the current Python source.
      *
      * Bundled Python (from jniLibs):
+     *   LD_PRELOAD = absolute paths of ALL .so files in nativeLibraryDir
+     *       -> Preloads every shared lib at process start, so transitive
+     *          deps of dlopen'd C extensions are already in the loaded map.
+     *          This is critical because DT_RUNPATH=$ORIGIN does NOT work
+     *          for transitive deps on Android (confirmed on device).
      *   LD_LIBRARY_PATH = nativeLibraryDir
-     *       -> Linker finds all .so files (patchelf already rewrote DT_NEEDED
-     *          entries to reference .so.so filenames in the same directory)
+     *       -> Linker finds all .so files for initial execve deps
      *   PYTHONHOME = stdlibDir
      *       -> Python finds lib/python3.13/...py (stdlib modules)
      *   PYTHONPATH = nativeLibraryDir
@@ -433,6 +437,28 @@ object PythonBridge {
             env["PYTHONHOME"] = stdlibDir!!
             env["PYTHONPATH"] = nativeLibDir
             env["TMPDIR"] = File(stdlibDir!!, "../tmp").absolutePath
+
+            // LD_PRELOAD: load ALL .so files from nativeLibraryDir at process start.
+            // This ensures that when Python dlopens C extension modules (e.g. zlib.so),
+            // and those modules need shared libs (e.g. libz.so), the libs are already
+            // in the process's loaded library map — no linker search needed.
+            //
+            // Why is this needed?
+            //   Android bionic ignores DT_RUNPATH=$ORIGIN for transitive deps of
+            //   libraries loaded via dlopen().  Python loads zlib.so via dlopen(),
+            //   zlib.so needs libz.so — the linker cannot find it despite $ORIGIN.
+            //   By preloading with absolute paths, we bypass all search logic.
+            val nativeDir = File(nativeLibDir)
+            if (nativeDir.isDirectory) {
+                val preloadLibs = nativeDir.listFiles()
+                    ?.filter { it.name.endsWith(".so") }
+                    ?.sortedBy { it.name }
+                    ?: emptyList()
+                if (preloadLibs.isNotEmpty()) {
+                    env["LD_PRELOAD"] = preloadLibs.joinToString(":", transform = { it.absolutePath })
+                    diag("[LD_PRELOAD] ${preloadLibs.size} libraries preloaded")
+                }
+            }
         } else {
             val py = pythonPath ?: return
             if (py.contains("termux")) {
