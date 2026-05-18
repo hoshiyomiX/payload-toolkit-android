@@ -54,6 +54,7 @@ object PythonBridge {
     private var pythonPath: String? = null
     private var pyzPath: String? = null
     private var stdlibDir: String? = null
+    private var sonameDirPath: String? = null
     private var isBundledPython = false
     private val initLock = Any()
 
@@ -106,6 +107,14 @@ object PythonBridge {
             val bundledPy = File(nativeLibDir, BUNDLED_PYTHON_LIB)
 
             diag("nativeLibraryDir: $nativeLibDir")
+
+            // Fix SONAME symlinks in nativeLibraryDir.
+            // AGP only packages files ending with .so, so versioned files like
+            // libz.so.1 are stored as libz.so.1.so in the APK.  At runtime we
+            // create symlinks in an app-writable directory so the linker can
+            // resolve DT_NEEDED references.
+            sonameDirPath = fixSonameSymlinks(nativeLibDir)
+
             diag("libpython3exec.so exists: ${bundledPy.isFile}")
             diag("libpython3exec.so canExecute: ${bundledPy.isFile && bundledPy.canExecute()}")
 
@@ -190,6 +199,56 @@ object PythonBridge {
             initialized = true
             return InitResult(true, pythonPath, pyzPath, isBundledPython)
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  SONAME symlink repair
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * AGP only packages files ending with ".so" from jniLibs.
+     * Versioned SONAME files like libz.so.1 were renamed to libz.so.1.so
+     * by prepare_python_runtime.sh so AGP would include them.
+     *
+     * At runtime, the linker resolves DT_NEEDED (e.g. "libz.so.1") by
+     * searching LD_LIBRARY_PATH directories.  We create symlinks in an
+     * app-writable directory (filesDir/python/soname/) from SONAME names
+     * to the .so.so files, and prepend this directory to LD_LIBRARY_PATH.
+     *
+     * Example:
+     *   filesDir/python/soname/libz.so.1 -> nativeLibraryDir/libz.so.1.so
+     *
+     * Returns the soname directory path (to be prepended to LD_LIBRARY_PATH).
+     */
+    private fun fixSonameSymlinks(nativeLibDir: String): String {
+        val sonameDir = File(filesDir, "python/soname")
+        if (!sonameDir.exists()) sonameDir.mkdirs()
+
+        var created = 0
+        val nativeDir = File(nativeLibDir)
+        nativeDir.listFiles()?.filter {
+            it.isFile && it.name.endsWith(".so.so")
+        }?.forEach { file ->
+            // libz.so.1.so -> remove trailing .so -> libz.so.1
+            val soname = file.name.removeSuffix(".so")
+            val link = File(sonameDir, soname)
+            if (!link.exists()) {
+                try {
+                    java.nio.file.Files.createSymbolicLink(
+                        link.toPath(),
+                        file.toPath()
+                    )
+                    created++
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to create symlink $soname: ${e.message}")
+                }
+            }
+        }
+        if (created > 0) {
+            Log.d(TAG, "Created $created SONAME symlinks in ${sonameDir.absolutePath}")
+            diag("Created $created SONAME symlinks in ${sonameDir.absolutePath}")
+        }
+        return sonameDir.absolutePath
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -422,7 +481,13 @@ object PythonBridge {
 
         if (isBundledPython && stdlibDir != null) {
             val nativeLibDir = pythonPath?.let { File(it).parent } ?: return
-            env["LD_LIBRARY_PATH"] = nativeLibDir
+            // LD_LIBRARY_PATH: soname dir first (for SONAME resolution),
+            // then nativeLibraryDir (for base libs and C extensions)
+            val ldPath = buildString {
+                sonameDirPath?.let { append("$it:") }
+                append(nativeLibDir)
+            }
+            env["LD_LIBRARY_PATH"] = ldPath
             env["PYTHONHOME"] = stdlibDir!!
             env["PYTHONPATH"] = nativeLibDir
             env["TMPDIR"] = File(stdlibDir!!, "../tmp").absolutePath

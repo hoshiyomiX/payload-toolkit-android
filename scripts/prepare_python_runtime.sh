@@ -4,12 +4,12 @@
 # Downloads Termux aarch64 packages and splits them into two outputs:
 #
 #   1. jniLibs/arm64-v8a/  — All .so files + Python binary
-#      → Extracted by Android package manager to nativeLibraryDir at install
-#      → nativeLibraryDir has SELinux app_lib_file context (EXECUTABLE)
+#      -> Extracted by Android package manager to nativeLibraryDir at install
+#      -> nativeLibraryDir has SELinux app_lib_file context (EXECUTABLE)
 #
 #   2. dist/python-stdlib.zip — Python stdlib .py files + configs
-#      → Bundled as Android asset, extracted to app data at first launch
-#      → Read-only access, no exec permission needed
+#      -> Bundled as Android asset, extracted to app data at first launch
+#      -> Read-only access, no exec permission needed
 #
 # Why this split?  Android SELinux blocks execve() from app_data_file context.
 # Files in nativeLibraryDir (from jniLibs) can be executed.  Pure .py files
@@ -31,11 +31,11 @@ DIST_DIR="$PROJECT_ROOT/dist"
 
 mkdir -p "$JNI_DIR" "$DIST_DIR" "$STDLIB_STAGING"
 
-# ── Fetch package index ────────────────────────────────────────────
+# -- Fetch package index -----------------------------------------------
 echo "==> Fetching Termux package index for ${ARCH}..."
 curl -sL "$REPO/dists/stable/main/binary-${ARCH}/Packages.gz" | gzip -d > "$STAGING/Packages"
 
-# ── Helpers ────────────────────────────────────────────────────────
+# -- Helpers -----------------------------------------------------------
 pkg_filename() {
     local pkg="$1"
     awk -v p="^Package: ${pkg}$" '
@@ -55,7 +55,7 @@ download_and_extract() {
     rm -f "$STAGING/${pkg}.deb"
 }
 
-# ── Download packages ──────────────────────────────────────────────
+# -- Download packages -------------------------------------------------
 echo ""
 echo "==> Downloading packages..."
 PACKAGES=(
@@ -82,50 +82,62 @@ if [ ! -d "$TERMUX_PREFIX/lib" ]; then
     exit 1
 fi
 
-# ── 1. Populate jniLibs/arm64-v8a/ ────────────────────────────────
+# -- 1. Populate jniLibs/arm64-v8a/ ------------------------------------
 # All .so files + Python binary go here.
 # Android extracts them to nativeLibraryDir (executable SELinux context).
 echo ""
 echo "==> Populating jniLibs/arm64-v8a/..."
 
-# Clean previous output (but keep directory)
-find "$JNI_DIR" -maxdepth 1 -name "*.so" -delete 2>/dev/null || true
+# Clean ALL previous output (including versioned .so.X files from git)
+find "$JNI_DIR" -maxdepth 1 \( -name "*.so" -o -name "*.so.*" \) -delete 2>/dev/null || true
 
-# Python binary → renamed to .so so Android packages it into lib/arm64-v8a/
+# Python binary -> renamed to .so so Android packages it into lib/arm64-v8a/
 if [ -f "$TERMUX_PREFIX/bin/python3.13" ]; then
     cp -a "$TERMUX_PREFIX/bin/python3.13" "$JNI_DIR/libpython3exec.so"
-    echo "    python3.13 → libpython3exec.so"
+    echo "    python3.13 -> libpython3exec.so"
 fi
 
-# Shared libraries from lib/ — include symlinks so the linker can
-# resolve SONAMEs (e.g. libpython3.13.so → libpython3.13.so.1.0)
+# Shared libraries from lib/ -- include symlinks so the linker can
+# resolve SONAMEs (e.g. libpython3.13.so -> libpython3.13.so.1.0)
 find "$TERMUX_PREFIX/lib" -maxdepth 1 -name "*.so*" \( -type f -o -type l \) | while read -r f; do
     cp -a "$f" "$JNI_DIR/"
 done
 
-# ── Resolve all symlinks to real file copies ──────────────────────────
-# APK is a ZIP file — ZIP cannot store symlinks.  Any symlink we cp -a'd
-# above will be lost when Gradle packages jniLibs into the APK.  The
-# Android dynamic linker resolves SONAMEs (e.g. libz.so.1) at dlopen
-# time, so those files MUST exist as real entries in the APK.
+# -- Resolve symlinks and fix SONAME extensions -------------------------
+# APK is a ZIP file -- ZIP cannot store symlinks.  Any symlink we cp -a'd
+# above will be lost when Gradle packages jniLibs into the APK.
 #
-# Strategy: after the cp -a pass, find every symlink in $JNI_DIR and
-# replace it with a hard copy of its target (which is always another .so
-# in the same directory).
-echo "    Resolving symlinks..."
-SYMLINK_COUNT=0
+# Additionally, Android Gradle Plugin only packages files from jniLibs
+# whose filename ENDS with .so.  SONAME files like libz.so.1 don't match
+# and are silently dropped from the APK.
+#
+# Strategy:
+#   1. Replace symlinks with real copies of their targets.
+#   2. For every file matching *.so.* (e.g. libz.so.1.3.2 or libz.so.1),
+#      create a copy with .so appended (e.g. libz.so.1.3.2.so) so AGP
+#      packages it.
+#   3. At runtime, PythonBridge.kt creates symlinks from the SONAME name
+#      to the .so.so file so the linker can find them by DT_NEEDED.
+echo "    Resolving symlinks and fixing SONAME extensions..."
+
+# Step 1: Replace symlinks with real copies
 find "$JNI_DIR" -maxdepth 1 -type l | while read -r link; do
     target=$(readlink -f "$link")
     if [ -f "$target" ]; then
-        # Remove symlink, copy the real file
         rm -f "$link"
         cp -a "$target" "$link"
-        SYMLINK_COUNT=$((SYMLINK_COUNT + 1))
     fi
 done
-echo "    Symlinks resolved (replaced with real copies)"
 
-# C extension modules from lib-dynload/ — these have names like
+# Step 2: Copy *.so.* files to *.so.*.so (append .so so AGP packages them)
+SONAME_COUNT=0
+find "$JNI_DIR" -maxdepth 1 -name '*.so.*' -type f | while read -r f; do
+    cp -a "$f" "${f}.so"
+    SONAME_COUNT=$((SONAME_COUNT + 1))
+done
+echo "    SONAME extensions fixed ($SONAME_COUNT files)"
+
+# C extension modules from lib-dynload/ -- these have names like
 # _hashlib.cpython-313-aarch64-linux-android.so (not "lib*" prefix,
 # but Android still extracts all .so files from jniLibs)
 if [ -d "$TERMUX_PREFIX/lib/python3.13/lib-dynload" ]; then
@@ -150,12 +162,12 @@ if [ ! -f "$JNI_DIR/libpython3exec.so" ]; then
     exit 1
 fi
 
-JNI_COUNT=$(find "$JNI_DIR" -maxdepth 1 -name "*.so" | wc -l)
+JNI_COUNT=$(find "$JNI_DIR" -maxdepth 1 -name "*.so" -o -name "*.so.*" | wc -l)
 JNI_SIZE=$(du -sh "$JNI_DIR" | cut -f1)
 echo "    $JNI_COUNT native libraries ($JNI_SIZE)"
 
-# ── 2. Create python-stdlib.zip ────────────────────────────────────
-# Only .py files and configs — no .so files (those are in jniLibs).
+# -- 2. Create python-stdlib.zip ----------------------------------------
+# Only .py files and configs -- no .so files (those are in jniLibs).
 echo ""
 echo "==> Creating python-stdlib.zip..."
 
@@ -192,7 +204,7 @@ fi
 STDLIB_SIZE=$(du -h "$DIST_DIR/python-stdlib.zip" | cut -f1)
 STDLIB_COUNT=$(zipinfo -1 "$DIST_DIR/python-stdlib.zip" | wc -l)
 
-# ── Summary ────────────────────────────────────────────────────────
+# -- Summary ------------------------------------------------------------
 echo ""
 echo "==========================================="
 echo "  jniLibs (native libs):"
@@ -204,6 +216,6 @@ echo "    Size:   $STDLIB_SIZE"
 echo "  Output:  $DIST_DIR/python-stdlib.zip"
 echo "==========================================="
 
-# ── Cleanup ────────────────────────────────────────────────────────
+# -- Cleanup ------------------------------------------------------------
 rm -rf "$STAGING"
 echo "Done!"
