@@ -527,7 +527,7 @@ if [ ! -x "$ZIG_BIN" ]; then
     echo "    Downloading zig $ZIG_VERSION (cross-compiler for Android)..."
     mkdir -p "$ZIG_CACHE"
     ZIG_ARCHIVE="$ZIG_CACHE/zig-linux-x86_64-$ZIG_VERSION.tar.xz"
-    wget -q "https://ziglang.org/builds/zig-linux-x86_64-$ZIG_VERSION.tar.xz" -O "$ZIG_ARCHIVE" || {
+    wget -q "https://ziglang.org/download/$ZIG_VERSION/zig-linux-x86_64-$ZIG_VERSION.tar.xz" -O "$ZIG_ARCHIVE" || {
         echo "    FAIL: Could not download zig"
         rm -rf "$STAGING"
         exit 1
