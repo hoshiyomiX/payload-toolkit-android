@@ -233,9 +233,8 @@ object PythonBridge {
                     diag("  This means a .so file has invalid program headers.")
                     diag("  The linker crashes during LD_PRELOAD before it can report which file.")
                     diag("  Check [ELF VALIDATION] section above for detected corrupt files.")
-                    diag("  If validation shows all files pass, the corruption may be in")
-                    diag("  a field not checked (e.g. dynamic section, section headers).")
-                    diag("  v3.15: removed patchelf --set-rpath to eliminate corruption vector.")
+                    diag("  v3.17: LD_PRELOAD removed. If this error persists from an old")
+                    diag("  APK, uninstall and reinstall from the latest build.")
                     diag("--- end analysis ---")
                 }
                 return InitResult(false, pythonPath, pyzPath, isBundledPython,
@@ -707,81 +706,19 @@ object PythonBridge {
             env["PYTHONPATH"] = nativeLibDir
             env["TMPDIR"] = File(stdlibDir!!, "../tmp").absolutePath
 
-            // LD_PRELOAD: load ALL .so files from nativeLibraryDir at process start.
-            // This ensures transitive deps are already loaded when Python dlopens
-            // C extension modules.  DT_RUNPATH=$ORIGIN does NOT work for transitive
-            // deps on Android bionic (confirmed on device).
+            // v3.17: NO LD_PRELOAD.  Previous approach preloaded all 74 .so files
+            // via LD_PRELOAD to handle transitive deps.  This caused persistent
+            // "Load CHECK 'did_read_' failed" crashes — some files have subtle
+            // ELF corruption not detectable from header validation.
             //
-            // Before preloading, validate each .so file to catch corrupt ELFs
-            // that would crash the linker (e.g. patchelf-corrupted small binaries).
-            val nativeDir = File(nativeLibDir)
-            if (nativeDir.isDirectory) {
-                val allSoFiles = nativeDir.listFiles()
-                    ?.filter { it.name.endsWith(".so") }
-                    ?.sortedBy { it.name }
-                    ?: emptyList()
-
-                // -- Per-file ELF validation --
-                diag("[ELF VALIDATION] checking ${allSoFiles.size} files...")
-                val invalidFiles = mutableListOf<String>()
-                val suspiciousFiles = mutableListOf<String>()
-                for (soFile in allSoFiles) {
-                    val name = soFile.name
-                    val size = soFile.length()
-
-                    // Check 1: ELF magic bytes
-                    if (!validateElfHeader(soFile)) {
-                        val msg = "INVALID ELF magic: $name (${formatBytes(size)})"
-                        diag("  FAIL: $msg")
-                        invalidFiles.add(msg)
-                        continue
-                    }
-
-                    // Check 2: Program header table bounds
-                    val phdrProblem = validateElfProgramHeaders(soFile)
-                    if (phdrProblem != null) {
-                        val msg = "PHDR OVERFLOW: $name (${formatBytes(size)}): $phdrProblem"
-                        diag("  FAIL: $msg")
-                        invalidFiles.add(msg)
-                        continue
-                    }
-
-                    // Check 3: Flag small files (< 8 KB) as suspicious
-                    // patchelf is known to corrupt tiny ELF binaries that lack
-                    // section padding for dynamic entry growth.
-                    if (size < 8192) {
-                        // These files are at risk of being corrupt even if
-                        // the header checks pass.  Log them for analysis.
-                        suspiciousFiles.add("$name (${size} bytes)")
-                    }
-                }
-
-                if (invalidFiles.isNotEmpty()) {
-                    diag("[ELF VALIDATION] FAILED: ${invalidFiles.size} corrupt files detected!")
-                    invalidFiles.forEach { diag("  $it") }
-                    diag("  These files will crash the linker via LD_PRELOAD.")
-                    diag("  ROOT CAUSE: patchelf corruption on small .so files.")
-                    diag("  FIX: add these files to the patchelf skip list in prepare_python_runtime.sh")
-                    // Still preload — the linker error will be caught by verifySetup
-                    // and displayed to the user.  But now we know WHICH file caused it.
-                } else {
-                    diag("[ELF VALIDATION] all ${allSoFiles.size} files pass header checks")
-                }
-
-                if (suspiciousFiles.isNotEmpty()) {
-                    diag("[ELF VALIDATION] ${suspiciousFiles.size} small files (< 8 KB, patchelf risk):")
-                    suspiciousFiles.forEach { diag("  SUSPICIOUS: $it") }
-                }
-
-                // Build LD_PRELOAD string
-                val preloadString = allSoFiles.joinToString(":", transform = { it.absolutePath })
-                env["LD_PRELOAD"] = preloadString
-                val totalPreloadSize = allSoFiles.sumOf { it.length() }
-                diag("[LD_PRELOAD] ${allSoFiles.size} libs, ${formatBytes(totalPreloadSize)} total")
-                allSoFiles.forEach { f ->
-                    diag("  preload: ${f.name} (${formatBytes(f.length())})")
-                }
-            }
+            // New approach: rely on LD_LIBRARY_PATH + build-time patching:
+            //   - DT_SONAME stripped → linker registers libs by filename
+            //   - DT_NEEDED unversioned → libz.so.1 → libz.so (matches APK files)
+            //   - LD_LIBRARY_PATH → linker searches nativeLibraryDir for all deps
+            //
+            // This gives SPECIFIC error messages ("library X not found") instead
+            // of generic crashes, making debugging immediate.
+            diag("[LIBRARY RESOLUTION] LD_LIBRARY_PATH=$nativeLibDir (no LD_PRELOAD)")
         } else {
             val py = pythonPath ?: return
             if (py.contains("termux")) {
