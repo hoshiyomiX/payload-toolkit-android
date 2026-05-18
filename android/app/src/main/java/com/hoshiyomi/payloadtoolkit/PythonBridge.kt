@@ -420,7 +420,7 @@ object PythonBridge {
                 // Verify we can actually read the first program header entry
                 if (ePhnum > 0L && ePhoff < size) {
                     raf.seek(ePhoff)
-                    val readLen = minOf(ePhentsize.toInt(), size - ePhoff.toInt()).coerceAtLeast(0)
+                    val readLen = minOf(ePhentsize.toInt(), (size - ePhoff).toInt()).coerceAtLeast(0)
                     if (readLen > 0) {
                         val firstPhdr = ByteArray(readLen)
                         raf.readFully(firstPhdr)
