@@ -350,7 +350,7 @@ done
 # Verify DT_RUNPATH is set (spot check)
 echo "    Verifying DT_RUNPATH patches..."
 RUNPATH_CHECK=$(patchelf --print-rpath "$JNI_DIR/libpython3exec.so" 2>/dev/null || true)
-if [ "$RUNPATH_CHECK" != '\$ORIGIN' ]; then
+if [ "$RUNPATH_CHECK" != '$ORIGIN' ]; then
     echo "    WARNING: libpython3exec.so RUNPATH is '$RUNPATH_CHECK' (expected \$ORIGIN)"
 else
     echo "    [OK] libpython3exec.so RUNPATH=\$ORIGIN"
@@ -454,7 +454,7 @@ MANIFEST="$DIST_DIR/native-libs-manifest.txt"
         name="$(basename "$so_file")"
         size="$(stat -c%s "$so_file" 2>/dev/null || echo 0)"
         # Collect DT_NEEDED entries (excluding system libs)
-        needed_list=$(patchelf --print-needed "$so_file" 2>/dev/null \
+        needed_list=$(patchelf --print-needed "$so_file" 2>/dev/null || true \
             | grep -v -E '^(libc|libm|libdl|libpthread|librt)\.so$' \
             | tr '\n' ',' | sed 's/,$//')
         echo "$name | $size | $needed_list"
