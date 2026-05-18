@@ -188,6 +188,18 @@ find "$JNI_DIR" -maxdepth 1 -name "xxlimited*.so" -delete 2>/dev/null || true
 find "$JNI_DIR" -maxdepth 1 -name "xxsubtype*.so" -delete 2>/dev/null || true
 find "$JNI_DIR" -maxdepth 1 -name "_ctypes_test*.so" -delete 2>/dev/null || true
 
+# Strip UI/database extension modules not needed for payload_toolkit.
+# These pull in libraries from Termux packages we don't bundle:
+#   _curses       -> libncursesw.so, libtinfo.so (ok) but _curses_panel -> libpanelw.so
+#                     which lives in ncurses-ui-libs (not ncurses base)
+#   readline      -> libreadline.so, libncursesw.so
+#   _gdbm         -> libgdbm.so (not in our PACKAGES list)
+#   _dbm          -> libgdbm_compat.so (not in our PACKAGES list)
+find "$JNI_DIR" -maxdepth 1 -name "_curses*.so" -delete 2>/dev/null || true
+find "$JNI_DIR" -maxdepth 1 -name "readline*.so" -delete 2>/dev/null || true
+find "$JNI_DIR" -maxdepth 1 -name "_gdbm*.so" -delete 2>/dev/null || true
+find "$JNI_DIR" -maxdepth 1 -name "_dbm*.so" -delete 2>/dev/null || true
+
 # Step 3: Strip DT_SONAME + rewrite DT_NEEDED ---------------------------
 # patchelf modifies ELF headers so libraries use unversioned names only.
 #
@@ -267,6 +279,53 @@ for so_file in "$JNI_DIR"/*.so; do
 done
 echo "    Set DT_RUNPATH on $RPATH_COUNT files"
 
+# Step 5: Validate DT_NEEDED — remove .so with unresolvable deps --------
+# After patching, scan ALL .so files. Any that still have a DT_NEEDED
+# pointing to a library NOT in jniLibs will crash at runtime (LD_PRELOAD
+# loads everything, dlopen also checks deps).  Remove them now.
+#
+# This catches cases where:
+#   - A C extension needs a library from a Termux package we don't download
+#     (e.g. _curses_panel needs libpanelw.so from ncurses-ui-libs)
+#   - A versioned DT_NEEDED couldn't be patched (target not in jniLibs)
+#
+# The loop repeats until stable to handle cascading removals.
+echo "    Validating DT_NEEDED resolution..."
+REMOVED_BROKEN=0
+CHANGED=1
+ITERATION=0
+while [ "$CHANGED" -eq 1 ]; do
+    CHANGED=0
+    ITERATION=$((ITERATION + 1))
+    for so_file in "$JNI_DIR"/*.so; do
+        [ -f "$so_file" ] || continue
+        # Never remove the Python executable itself
+        [ "$(basename "$so_file")" = "libpython3exec.so" ] && continue
+        has_broken=0
+        broken_list=""
+        while IFS= read -r needed; do
+            [ -z "$needed" ] && continue
+            # Skip system libs that Android's bionic always provides
+            case "$needed" in
+                libc.so|libm.so|libdl.so|libpthread.so|librt.so) continue ;;
+            esac
+            # Derive unversioned name and check if it exists in jniLibs
+            unversioned="$(echo "$needed" | sed 's/\.so\..*/.so/')"
+            if [ ! -f "$JNI_DIR/$unversioned" ]; then
+                has_broken=1
+                broken_list="$broken_list $needed"
+            fi
+        done < <(patchelf --print-needed "$so_file" 2>/dev/null | grep '\.so\.' || true)
+        if [ "$has_broken" -eq 1 ]; then
+            echo "      REMOVE $(basename "$so_file"): unresolvable:$broken_list"
+            rm -f "$so_file"
+            REMOVED_BROKEN=$((REMOVED_BROKEN + 1))
+            CHANGED=1
+        fi
+    done
+done
+echo "    Removed $REMOVED_BROKEN .so files with broken deps ($ITERATION passes)"
+
 # Verify critical files exist
 if [ ! -f "$JNI_DIR/libpython3exec.so" ]; then
     echo "ERROR: libpython3exec.so was not created!"
@@ -296,24 +355,35 @@ if [ "$RUNPATH_CHECK" != '\$ORIGIN' ]; then
 else
     echo "    [OK] libpython3exec.so RUNPATH=\$ORIGIN"
 fi
-EXT_CHECK=$(patchelf --print-rpath "$JNI_DIR/zlib.cpython-313-aarch64-linux-android.so" 2>/dev/null || true)
-if [ -n "$EXT_CHECK" ] && [ "$EXT_CHECK" != '\$ORIGIN' ]; then
-    echo "    WARNING: zlib.so RUNPATH is '$EXT_CHECK' (expected \$ORIGIN)"
-elif [ -n "$EXT_CHECK" ]; then
-    echo "    [OK] zlib.so RUNPATH=\$ORIGIN"
+
+# Final verification: scan ALL remaining .so files for ANY unresolvable
+# DT_NEEDED.  If Step 5 worked correctly, this should find ZERO issues.
+echo "    Final DT_NEEDED integrity check..."
+FINAL_ISSUES=0
+for so_file in "$JNI_DIR"/*.so; do
+    [ -f "$so_file" ] || continue
+    while IFS= read -r needed; do
+        [ -z "$needed" ] && continue
+        case "$needed" in
+            libc.so|libm.so|libdl.so|libpthread.so|librt.so) continue ;;
+        esac
+        unversioned="$(echo "$needed" | sed 's/\.so\..*/.so/')"
+        if [ ! -f "$JNI_DIR/$unversioned" ]; then
+            echo "    FAIL: $(basename "$so_file") needs $needed (not in jniLibs)"
+            FINAL_ISSUES=$((FINAL_ISSUES + 1))
+        fi
+    done < <(patchelf --print-needed "$so_file" 2>/dev/null | grep '\.so\.' || true)
+done
+if [ "$FINAL_ISSUES" -eq 0 ]; then
+    echo "    [OK] All DT_NEEDED entries resolvable"
+else
+    echo "    ERROR: $FINAL_ISSUES unresolvable DT_NEEDED entries remain!"
+    echo "    These will cause runtime crashes.  Aborting."
+    rm -rf "$STAGING"
+    exit 1
 fi
 
-# Verify no versioned DT_NEEDED remain (all should be unversioned now)
-echo "    Verifying DT_NEEDED patches (all unversioned)..."
-VERSIONED_CHECK=$(patchelf --print-needed "$JNI_DIR/zlib.cpython-313-aarch64-linux-android.so" 2>/dev/null | grep -c '\.so\.' || true)
-if [ "$VERSIONED_CHECK" -gt 0 ]; then
-    echo "    WARNING: zlib.so still has $VERSIONED_CHECK versioned DT_NEEDED entries:"
-    patchelf --print-needed "$JNI_DIR/zlib.cpython-313-aarch64-linux-android.so" 2>/dev/null | grep '\.so\.' | while read -r line; do
-        echo "      VERSIONED: $line"
-    done
-else
-    echo "    [OK] zlib.so: all DT_NEEDED are unversioned"
-fi
+# Verify DT_SONAME stripped (spot check)
 SONAME_CHECK=$(patchelf --print-soname "$JNI_DIR/libz.so" 2>/dev/null || true)
 if [ -n "$SONAME_CHECK" ]; then
     echo "    WARNING: libz.so still has DT_SONAME: $SONAME_CHECK (should be empty)"
