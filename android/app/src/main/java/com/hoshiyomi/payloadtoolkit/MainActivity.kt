@@ -147,9 +147,16 @@ class MainActivity : AppCompatActivity() {
                         showLog("\u2550".repeat(50) + "\n\n")
                     } else {
                         showLog("WARNING: ${result.error}\n\n")
-                        showLog("This app requires a Python runtime.\n")
-                        showLog("If bundled extraction failed, ensure the APK\n")
-                        showLog("was downloaded (not from a partial build).\n")
+                        // Show detailed diagnostics so the user can report them
+                        if (result.diagnostics.isNotBlank()) {
+                            showLog("[Diagnostics]\n")
+                            showLog(result.diagnostics)
+                            showLog("\u2550".repeat(50) + "\n\n")
+                        }
+                        showLog("Possible causes:\n")
+                        showLog("  - APK installed from an old build (before v3.0)\n")
+                        showLog("  - App installed but native libs extraction failed\n")
+                        showLog("  - Try: Uninstall -> Re-download latest APK -> Install\n")
                         showLog("\u2550".repeat(50) + "\n\n")
                     }
                 }

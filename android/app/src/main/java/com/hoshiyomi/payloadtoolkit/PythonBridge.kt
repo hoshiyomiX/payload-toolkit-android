@@ -62,8 +62,17 @@ object PythonBridge {
         val pythonPath: String?,
         val pyzPath: String?,
         val isBundled: Boolean = false,
-        val error: String? = null
+        val error: String? = null,
+        val diagnostics: String = ""
     )
+
+    /** Detailed diagnostic information for troubleshooting. */
+    private val diagnosticLog = StringBuilder()
+
+    private fun diag(msg: String) {
+        Log.d(TAG, msg)
+        diagnosticLog.appendLine(msg)
+    }
 
     /**
      * Initialize: extract assets and prepare Python runtime.
@@ -78,6 +87,7 @@ object PythonBridge {
         synchronized(initLock) {
             if (initialized) return InitResult(true, pythonPath, pyzPath, isBundledPython)
 
+            diagnosticLog.clear()
             val ctx = context
                 ?: return InitResult(false, null, null, error = "Context required")
 
@@ -85,49 +95,96 @@ object PythonBridge {
             val extractedPyz = extractPyz(ctx)
             if (extractedPyz == null) {
                 return InitResult(false, null, null,
-                    error = "Failed to extract $PYZ_ASSET_NAME from assets")
+                    error = "Failed to extract $PYZ_ASSET_NAME from assets",
+                    diagnostics = diagnosticLog.toString())
             }
             pyzPath = extractedPyz
-            Log.d(TAG, ".pyz extracted to $pyzPath")
+            diag("[OK] .pyz extracted: $pyzPath (${File(pyzPath).length()} bytes)")
 
             // Step 2: Try bundled Python from nativeLibraryDir (jniLibs)
             val nativeLibDir = ctx.applicationInfo.nativeLibraryDir
             val bundledPy = File(nativeLibDir, BUNDLED_PYTHON_LIB)
 
+            diag("nativeLibraryDir: $nativeLibDir")
+            diag("libpython3exec.so exists: ${bundledPy.isFile}")
+            diag("libpython3exec.so canExecute: ${bundledPy.isFile && bundledPy.canExecute()}")
+
+            // List contents of nativeLibraryDir for diagnostics
+            val nativeDir = File(nativeLibDir)
+            if (nativeDir.isDirectory) {
+                val soFiles = nativeDir.listFiles()?.filter { it.name.endsWith(".so") }
+                diag("Total .so in nativeLibraryDir: ${soFiles?.size ?: 0}")
+                val pythonSo = soFiles?.filter { it.name.contains("python") }
+                if (pythonSo.isNullOrEmpty()) {
+                    diag("WARNING: No python-related .so files found in nativeLibraryDir")
+                    // List all files for full visibility
+                    val allFiles = nativeDir.listFiles()?.map { it.name }?.sorted()
+                    if (!allFiles.isNullOrEmpty()) {
+                        diag("Files in nativeLibraryDir: ${allFiles.take(10).joinToString(", ")}")
+                        if (allFiles.size > 10) diag("  ... and ${allFiles.size - 10} more")
+                    } else {
+                        diag("nativeLibraryDir is EMPTY")
+                    }
+                } else {
+                    diag("Python-related .so files: ${pythonSo.map { it.name }.joinToString(", ")}")
+                }
+            } else {
+                diag("ERROR: nativeLibraryDir does not exist or is not a directory")
+            }
+
             if (bundledPy.isFile) {
+                diag("Attempting bundled Python initialization...")
+
+                // Check if stdlib asset exists before extraction
+                val stdlibAssets = try {
+                    ctx.assets.list("")?.filter { it.contains("stdlib") || it.contains("python") }
+                } catch (_: Exception) { null }
+                diag("Python-related assets: ${stdlibAssets?.joinToString(", ") ?: "none found"}")
+
                 // Extract Python stdlib (.py files) from assets
                 val extractedStdlib = extractStdlib(ctx)
                 if (extractedStdlib != null) {
                     stdlibDir = extractedStdlib
                     pythonPath = bundledPy.absolutePath
                     isBundledPython = true
-                    Log.d(TAG, "Bundled Python: $pythonPath")
-                    Log.d(TAG, "Stdlib dir: $stdlibDir")
+                    diag("[OK] Bundled Python: $pythonPath")
+                    diag("[OK] Stdlib dir: $stdlibDir")
                 } else {
+                    diag("FAILED: Stdlib extraction returned null")
                     Log.w(TAG, "Stdlib extraction failed, trying fallback")
                 }
+            } else {
+                diag("Bundled Python not found — checking if APK was built with jniLibs")
             }
 
             // Step 3: Fallback to system Python
             if (pythonPath == null) {
+                diag("Trying system Python fallback...")
                 val found = findSystemPython()
                 if (found != null) {
                     pythonPath = found
                     isBundledPython = false
-                    Log.d(TAG, "System Python: $pythonPath")
+                    diag("[OK] System Python: $pythonPath")
+                } else {
+                    diag("FAILED: No system Python found either")
                 }
             }
 
             if (pythonPath == null) {
+                val diagText = diagnosticLog.toString()
+                Log.e(TAG, "Init failed. Diagnostics:\n$diagText")
                 return InitResult(false, null, pyzPath,
-                    error = "No Python runtime available")
+                    error = "No Python runtime available",
+                    diagnostics = diagText)
             }
 
             // Step 4: Smoke test
             val verifyError = verifySetup()
             if (verifyError != null) {
                 Log.w(TAG, "Verify failed: $verifyError")
-                return InitResult(false, pythonPath, pyzPath, isBundledPython, verifyError)
+                diag("Verify failed: $verifyError")
+                return InitResult(false, pythonPath, pyzPath, isBundledPython,
+                    verifyError, diagnosticLog.toString())
             }
 
             initialized = true
@@ -389,6 +446,9 @@ object PythonBridge {
     fun getPythonPath(): String? = pythonPath
     fun getPyzPath(): String? = pyzPath
     fun isBundled(): Boolean = isBundledPython
+
+    /** Get the last initialization diagnostic log (for UI display). */
+    fun getDiagnostics(): String = diagnosticLog.toString()
 
     fun checkDependencies(): String {
         val py = pythonPath ?: return "ERROR: Python not initialized"
