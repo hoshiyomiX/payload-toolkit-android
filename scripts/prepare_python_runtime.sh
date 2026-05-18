@@ -60,6 +60,7 @@ echo ""
 echo "==> Downloading packages..."
 PACKAGES=(
     python
+    libandroid-posix-semaphore
     libandroid-support
     libbz2
     libcrypt
@@ -247,6 +248,7 @@ for so_file in "$JNI_DIR"/*.so; do
             libc.so|libm.so|libdl.so|libpthread.so|librt.so) continue ;;
         esac
         # Only patch versioned names (e.g. libz.so.1, libcrypto.so.3)
+        # Unversioned deps are checked by the validation sweep below
         if [[ "$needed" == *.so.* ]]; then
             # Derive unversioned name: libz.so.1 -> libz.so
             unversioned="$(echo "$needed" | sed 's/\.so\..*/.so/')"
@@ -309,13 +311,19 @@ while [ "$CHANGED" -eq 1 ]; do
             case "$needed" in
                 libc.so|libm.so|libdl.so|libpthread.so|librt.so) continue ;;
             esac
-            # Derive unversioned name and check if it exists in jniLibs
-            unversioned="$(echo "$needed" | sed 's/\.so\..*/.so/')"
+            # Check BOTH versioned and unversioned deps
+            # Versioned: libfoo.so.1 -> check if libfoo.so exists
+            # Unversioned: libfoo.so -> check if libfoo.so exists
+            if [[ "$needed" == *.so.* ]]; then
+                unversioned="$(echo "$needed" | sed 's/\.so\..*/.so/')"
+            else
+                unversioned="$needed"
+            fi
             if [ ! -f "$JNI_DIR/$unversioned" ]; then
                 has_broken=1
                 broken_list="$broken_list $needed"
             fi
-        done < <(patchelf --print-needed "$so_file" 2>/dev/null | grep '\.so\.' || true)
+        done < <(patchelf --print-needed "$so_file" 2>/dev/null || true)
         if [ "$has_broken" -eq 1 ]; then
             echo "      REMOVE $(basename "$so_file"): unresolvable:$broken_list"
             rm -f "$so_file"
@@ -367,12 +375,17 @@ for so_file in "$JNI_DIR"/*.so; do
         case "$needed" in
             libc.so|libm.so|libdl.so|libpthread.so|librt.so) continue ;;
         esac
-        unversioned="$(echo "$needed" | sed 's/\.so\..*/.so/')"
+        # Check BOTH versioned and unversioned deps
+        if [[ "$needed" == *.so.* ]]; then
+            unversioned="$(echo "$needed" | sed 's/\.so\..*/.so/')"
+        else
+            unversioned="$needed"
+        fi
         if [ ! -f "$JNI_DIR/$unversioned" ]; then
             echo "    FAIL: $(basename "$so_file") needs $needed (not in jniLibs)"
             FINAL_ISSUES=$((FINAL_ISSUES + 1))
         fi
-    done < <(patchelf --print-needed "$so_file" 2>/dev/null | grep '\.so\.' || true)
+    done < <(patchelf --print-needed "$so_file" 2>/dev/null || true)
 done
 if [ "$FINAL_ISSUES" -eq 0 ]; then
     echo "    [OK] All DT_NEEDED entries resolvable"
