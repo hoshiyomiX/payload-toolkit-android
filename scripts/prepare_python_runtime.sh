@@ -292,61 +292,48 @@ sys.exit(0 if fix_soname('$so_file', '$FILENAME') else 1)" 2>/dev/null; then
         SONAME_REMOVED=$((SONAME_REMOVED + 1))
     fi
 
-    # Patch versioned DT_NEEDED -> unversioned
-    while IFS= read -r needed; do
-        [ -z "$needed" ] && continue
-        # Skip system libs that Android provides
-        is_android_system_lib "$needed" && continue
-        # Only patch versioned names (e.g. libz.so.1, libcrypto.so.3)
-        # Unversioned deps are checked by the validation sweep below
-        if [[ "$needed" == *.so.* ]]; then
-            # Derive unversioned name: libz.so.1 -> libz.so
-            unversioned="$(echo "$needed" | sed 's/\.so\..*/.so/')"
-            if [ -f "$JNI_DIR/$unversioned" ]; then
-                if patchelf --replace-needed "$needed" "$unversioned" "$so_file" 2>/dev/null; then
-                    NEEDED_PATCHED=$((NEEDED_PATCHED + 1))
-                    file_patched=1
-                fi
-            fi
-        fi
-    done < <(patchelf --print-needed "$so_file" 2>/dev/null)
-    [ "$file_patched" -eq 1 ] && NEEDED_FILES=$((NEEDED_FILES + 1))
+    # NOTE: We do NOT use patchelf --replace-needed here because it adds a
+    # NEW string to .dynstr and changes DT_NEEDED to point to it.  This
+    # breaks the .gnu.version_r (verneed) section, which still references
+    # the ORIGINAL string.  Android's bionic linker uses verneed for
+    # resolution, so DT_NEEDED and verneed must agree on the same string.
+    # Instead, we patch DT_NEEDED in-place via Python (Step 3b below).
 done
 echo "    Renamed $SONAME_REMOVED DT_SONAME -> filename"
-echo "    Patched $NEEDED_PATCHED DT_NEEDED -> unversioned in $NEEDED_FILES files"
 echo "    Skipped $PATCHELF_SKIPPED files (< ${PATCHELF_MIN_SIZE} bytes, patchelf unsafe)"
 
-# Step 3b: Python-based patching for files skipped by patchelf (< 8KB).
-# These small files (typically C extension modules) still have versioned
-# DT_NEEDED entries that patchelf couldn't touch.  Use in-place .dynstr
-# string replacement — safe because it doesn't grow any ELF sections.
-if [ "$PATCHELF_SKIPPED" -gt 0 ]; then
-    echo "    Patching $PATCHELF_SKIPPED small files with Python binary patcher..."
-    PYTHON_SONAME=0
-    PYTHON_NEEDED=0
-    for so_file in "$JNI_DIR"/*.so; do
-        [ -f "$so_file" ] || continue
-        file_size=$(stat -c%s "$so_file" 2>/dev/null || echo 0)
-        [ "$file_size" -ge "$PATCHELF_MIN_SIZE" ] && continue
-        FILENAME=$(basename "$so_file")
-        # Fix SONAME
-        if python3 -c "
-import sys; sys.path.insert(0, '$SCRIPT_DIR')
-from validate_elf import fix_soname
-sys.exit(0 if fix_soname('$so_file', '$FILENAME') else 1)" 2>/dev/null; then
-            PYTHON_SONAME=$((PYTHON_SONAME + 1))
-        fi
-        # Fix DT_NEEDED (versioned -> unversioned)
-        PATCHED=$(python3 -c "
+# Step 3b: Python in-place .dynstr patching for ALL .so files.
+#
+# CRITICAL: This replaces patchelf --replace-needed entirely.
+# patchelf --replace-needed adds a NEW string to .dynstr and updates
+# DT_NEEDED to point to it.  But the .gnu.version_r (verneed) entry
+# still references the ORIGINAL string.  When bionic's linker loads
+# an extension module, it reads verneed[0].vn_file from .dynstr to
+# find the needed library by name.  If DT_NEEDED says "libz.so"
+# (new string) but verneed says "libz.so.1" (old string), the
+# linker cannot resolve the dependency → "dlopen failed: cannot find
+# libz.so from verneed[0]".
+#
+# Python fix: modify the ORIGINAL string in-place in .dynstr so BOTH
+# DT_NEEDED and verneed see the same updated string.  This works
+# because the new name is always shorter (libz.so.1 → libz.so).
+# No section growth, no corruption, no verneed mismatch.
+echo "    Patching DT_NEEDED (versioned -> unversioned) in all files..."
+PYTHON_NEEDED=0
+PYTHON_NEEDED_FILES=0
+for so_file in "$JNI_DIR"/*.so; do
+    [ -f "$so_file" ] || continue
+    FILENAME=$(basename "$so_file")
+    PATCHED=$(python3 -c "
 import sys; sys.path.insert(0, '$SCRIPT_DIR')
 from validate_elf import fix_needed_all
 print(fix_needed_all('$so_file', '$JNI_DIR'))" 2>/dev/null || echo 0)
-        if [ "$PATCHED" -gt 0 ]; then
-            PYTHON_NEEDED=$((PYTHON_NEEDED + PATCHED))
-        fi
-    done
-    echo "    Python patcher: renamed $PYTHON_SONAME SONAMEs, patched $PYTHON_NEEDED DT_NEEDEDs"
-fi
+    if [ "$PATCHED" -gt 0 ]; then
+        PYTHON_NEEDED=$((PYTHON_NEEDED + PATCHED))
+        PYTHON_NEEDED_FILES=$((PYTHON_NEEDED_FILES + 1))
+    fi
+done
+echo "    Python patcher: patched $PYTHON_NEEDED DT_NEEDED in $PYTHON_NEEDED_FILES files"
 
 # Step 4b: Post-patchelf ELF integrity validation ------------------------
 # patchelf modifies ELF sections (DYNAMIC, dynstr).  On .so files with
