@@ -145,6 +145,8 @@ object PayloadBridge {
         }
         args.add("-n")
         args.add(device)
+        args.add("-f")
+        args.add(fingerprint)
         return executePyz(args)
     }
 

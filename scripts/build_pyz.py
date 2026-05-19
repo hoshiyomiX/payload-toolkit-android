@@ -133,6 +133,8 @@ def main():
             opts["name"] = args[i + 1]; i += 1
         elif a in ("-k", "--key") and i + 1 < len(args):
             opts["key"] = args[i + 1]; i += 1
+        elif a in ("-f", "--fingerprint") and i + 1 < len(args):
+            opts["fingerprint"] = args[i + 1]; i += 1
         elif a.startswith("-"):
             print("Error: Unknown option: %s" % a, file=sys.stderr)
             sys.exit(1)
@@ -142,7 +144,7 @@ def main():
     #   info  -> payload_path, verbose
     #   dump  -> payload_path, output_dir, partitions
     #   gen   -> images, output_path, compress
-    #   zip   -> images, output_path, compress, device
+    #   zip   -> images, output_path, compress, device, fingerprint
     #   sign  -> input_path, output_path, key_path
     params = {"mode": mode, "verbose": verbose}
 
@@ -189,6 +191,8 @@ def main():
         params["compress"] = opts.get("compress", "gzip")
         if opts.get("name"):
             params["device"] = opts["name"]
+        if opts.get("fingerprint"):
+            params["fingerprint"] = opts["fingerprint"]
 
     elif mode == "sign":
         if "input" not in opts:
