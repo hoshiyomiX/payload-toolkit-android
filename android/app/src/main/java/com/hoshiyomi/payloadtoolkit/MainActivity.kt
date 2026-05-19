@@ -113,6 +113,7 @@ class MainActivity : AppCompatActivity() {
         setupDeviceMetaFields()
         setupOutputField()
         setupCustomFilenameField()
+        setupThemeToggle()
 
         requestStoragePermissions()
         handleIncomingIntent(intent)
@@ -203,29 +204,49 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreateOptionsMenu(menu: android.view.Menu?): Boolean {
-        menuInflater.inflate(R.menu.settings_menu, menu)
+        menuInflater.inflate(R.menu.toolbar_menu, menu)
+        updateThemeIcon(menu)
         return true
     }
 
     override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
         return when (item.itemId) {
-            R.id.theme_light -> {
-                prefs.edit { putString("pref_theme_mode", "light") }
-                AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
-                true
-            }
-            R.id.theme_dark -> {
-                prefs.edit { putString("pref_theme_mode", "dark") }
-                AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
-                true
-            }
-            R.id.theme_system -> {
-                prefs.edit { putString("pref_theme_mode", "system") }
-                AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
+            R.id.action_toggle_theme -> {
+                cycleTheme()
                 true
             }
             else -> super.onOptionsItemSelected(item)
         }
+    }
+
+    /** Cycle theme: System -> Light -> Dark -> System */
+    private fun cycleTheme() {
+        val current = prefs.getString("pref_theme_mode", "system") ?: "system"
+        val next = when (current) {
+            "system" -> "light"
+            "light" -> "dark"
+            else -> "system"
+        }
+        prefs.edit { putString("pref_theme_mode", next) }
+        applyTheme()
+        // Update toolbar icon after recreation
+        invalidateOptionsMenu()
+    }
+
+    /** Update the theme toggle menu icon to reflect current mode. */
+    private fun updateThemeIcon(menu: android.view.Menu?) {
+        val item = menu?.findItem(R.id.action_toggle_theme) ?: return
+        val mode = prefs.getString("pref_theme_mode", "system") ?: "system"
+        item.setIcon(when (mode) {
+            "light" -> android.R.drawable.ic_menu_day // sun
+            "dark" -> android.R.drawable.ic_menu_night // moon
+            else -> android.R.drawable.ic_menu_manage // auto/system
+        })
+    }
+
+    private fun setupThemeToggle() {
+        // Theme toggle is handled via toolbar menu item (R.id.action_toggle_theme).
+        // No extra setup needed here — onCreateOptionsMenu + onOptionsItemSelected handle it.
     }
 
     private fun setupCustomFilenameField() {

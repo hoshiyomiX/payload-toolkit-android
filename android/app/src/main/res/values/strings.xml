@@ -9,18 +9,25 @@
     <!-- Partitions section -->
     <string name="label_partitions">PARTITIONS</string>
     <string name="hint_no_images">No images added yet</string>
-    <string name="hint_add_images_prompt">Select partition image files (.img) to repack into a flashable OTA ZIP.</string>
+    <string name="hint_add_images_prompt">Select partition image files (.img) to bundle into a flashable OTA ZIP.</string>
     <string name="button_add_images">Add Images</string>
     <string name="button_remove_all">Remove All</string>
 
     <!-- Compression section -->
     <string name="label_compression">COMPRESSION</string>
+    <string name="description_compression">Algorithm used to compress partition data inside the bundle. gzip offers the best balance of speed and size for TWRP/OrangeFox.</string>
+
+    <!-- Device section -->
+    <string name="label_device">DEVICE</string>
+    <string name="hint_device_optional">Optional</string>
+    <string name="hint_device_codename">Device codename</string>
+    <string name="helper_device_codename">Target device for safety check (e.g. crosshatch, S666LN-OP)</string>
 
     <!-- Output section -->
     <string name="label_output">OUTPUT</string>
     <string name="hint_output_dir">App internal storage (default)</string>
     <string name="hint_custom_filename">Custom filename (optional)</string>
-    <string name="helper_custom_filename">Leave empty for auto-generated name (e.g. flashable_dd_boot_v16_gzip.zip)</string>
+    <string name="helper_custom_filename">Leave empty for auto-generated name</string>
     <string name="button_browse">Browse</string>
 
     <!-- Actions -->
@@ -30,6 +37,9 @@
     <string name="button_clear_log">Clear</string>
     <string name="log_copied">Log copied to clipboard</string>
 
+    <!-- Log section -->
+    <string name="label_output_log">Output Log</string>
+
     <!-- Status messages -->
     <string name="status_initializing">Initializing Python runtime…</string>
     <string name="status_executing">Repacking partitions…</string>
@@ -37,13 +47,9 @@
     <!-- About dialog -->
     <string name="about_title">About Payload Toolkit</string>
     <string name="about_version">Version %1$s</string>
-    <string name="about_description">Non-root Android APK for repacking partition images into flashable OTA ZIP.\n\nBased on payload_toolkit v2.0 — AOSP-compliant OTA payload.bin toolkit.\n\nRequires Python runtime (Termux recommended).\nPython code delivered as .pyz zipapp (architecture-independent).</string>
+    <string name="about_description">Non-root Android app for repacking partition images into flashable OTA ZIP.\n\nBased on payload_toolkit — AOSP-compliant OTA toolkit.\n\nDD mode generates ddbundle-format ZIPs flashable via TWRP/OrangeFox recovery.</string>
     <string name="about_ok">OK</string>
 
-    <!-- Settings / Theme -->
-    <string name="settings_title">Settings</string>
-    <string name="theme_light">Light</string>
-    <string name="theme_dark">Dark</string>
-    <string name="theme_system">System default</string>
-    <string name="theme_label">Theme</string>
+    <!-- Theme -->
+    <string name="theme_label">Toggle theme</string>
 </resources>

@@ -29,14 +29,18 @@ data class PayloadResult(
 /**
  * PayloadBridge — Kotlin singleton that bridges the Android UI to payload_toolkit.pyz.
  *
- * Primary use case: Repack partition images (.img) into a flashable OTA ZIP.
+ * This app is DD-mode only: generates ddbundle-format flashable ZIPs
+ * from partition images (.img) for TWRP/OrangeFox recovery flashing.
  *
- * The .pyz is run as a subprocess using the device's Python (Termux or system).
+ * Supported compression: none, gzip, bzip2, xz
  */
 object PayloadBridge {
 
-    // Compression algorithm choices (dd mode supports gzip, bzip2, xz)
-    val COMPRESSION_ALGORITHMS = listOf("gzip", "bzip2", "xz")
+    // Compression algorithm choices exposed in the UI spinner
+    val COMPRESSION_ALGORITHMS = listOf("gzip", "none", "bzip2", "xz")
+
+    // All valid compression values (for validation)
+    val ALL_COMPRESSION = setOf("none", "gzip", "bzip2", "xz")
 
     /**
      * Execute payload_toolkit.pyz with the given CLI arguments.
@@ -59,62 +63,12 @@ object PayloadBridge {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  Core operations
+    //  Core operation — DD mode only
     // ═══════════════════════════════════════════════════════════════
-
-    /**
-     * INFO mode — Parse and display payload.bin metadata.
-     */
-    suspend fun getInfo(payloadPath: String, verbose: Boolean = false): PayloadResult {
-        val args = mutableListOf("info", "-i", payloadPath)
-        if (verbose) args.add("-v")
-        return executePyz(args)
-    }
-
-    /**
-     * DUMP mode — Extract partition images from payload.bin.
-     */
-    suspend fun dump(
-        payloadPath: String,
-        outputDir: String,
-        partitions: List<String> = emptyList()
-    ): PayloadResult {
-        val args = mutableListOf("dump", "-i", payloadPath, "-o", outputDir)
-        if (partitions.isNotEmpty()) {
-            args.add("-p")
-            args.add(partitions.joinToString(","))
-        }
-        return executePyz(args)
-    }
-
-    /**
-     * GEN mode — Generate a partial payload.bin from .img files.
-     */
-    suspend fun gen(
-        images: Map<String, String>,
-        compression: String = "none",
-        outputPath: String
-    ): PayloadResult {
-        if (images.isEmpty()) return PayloadResult.error("No images specified for generation")
-        if (compression !in COMPRESSION_ALGORITHMS)
-            return PayloadResult.error("Invalid compression: '$compression'")
-
-        val firstPath = images.values.first()
-        val imagesDir = File(firstPath).parentFile?.absolutePath
-            ?: return PayloadResult.error("Cannot determine images directory")
-
-        val args = mutableListOf("gen", "-i", imagesDir, "-o", outputPath)
-        if (compression != "none") {
-            args.add("-c")
-            args.add(compression)
-        }
-        return executePyz(args)
-    }
 
     /**
      * DD mode — Generate a dd-based flashable ZIP (ddbundle format).
      *
-     * This is the primary mode for Payload Toolkit.
      * Produces a flashable ZIP with:
      *   - ddbundle.bin (compressed partition images)
      *   - META-INF/com/google/android/update-binary (TWRP/OrangeFox flasher script)
@@ -123,7 +77,7 @@ object PayloadBridge {
      *
      * @param images Map of partition name -> absolute path to .img file
      * @param device Device codename (e.g. "crosshatch", "S666LN-OP")
-     * @param compression Compression algorithm: gzip, bzip2, or xz
+     * @param compression Compression algorithm: none, gzip, bzip2, or xz
      * @param outputPath Absolute path to output .zip file
      */
     suspend fun dd(
@@ -133,7 +87,7 @@ object PayloadBridge {
         outputPath: String
     ): PayloadResult {
         if (images.isEmpty()) return PayloadResult.error("No images specified for DD ZIP")
-        if (compression !in COMPRESSION_ALGORITHMS)
+        if (compression !in ALL_COMPRESSION)
             return PayloadResult.error("Invalid compression: '$compression'")
 
         // dd mode uses --image (repeatable) + --partition (repeatable)
@@ -164,7 +118,7 @@ object PayloadBridge {
      *
      * Examples:
      *   - flashable_dd_odm_dlkm_v16_gzip.zip
-     *   - flashable_boot_vendor_v16_bzip2.zip
+     *   - flashable_boot_vendor_v16_raw.zip
      */
     fun buildOutputFileName(images: Map<String, String>, compression: String, version: Int = 16): String {
         val partitionNames = images.keys.sorted().joinToString("_")
@@ -172,26 +126,9 @@ object PayloadBridge {
         return "flashable_dd_${partitionNames}_v${version}_${compressSuffix}.zip"
     }
 
-    /**
-     * SIGN mode — Sign an existing payload.bin with RSA key.
-     */
-    suspend fun sign(
-        inputPath: String,
-        outputPath: String,
-        keyPath: String,
-        certPath: String
-    ): PayloadResult {
-        val args = mutableListOf("sign", "-i", inputPath, "-k", keyPath, "-o", outputPath)
-        return executePyz(args)
-    }
-
     // ═══════════════════════════════════════════════════════════════
     //  Utility methods
     // ═══════════════════════════════════════════════════════════════
-
-    suspend fun validatePayload(payloadPath: String): Boolean {
-        return try { getInfo(payloadPath).success } catch (_: Exception) { false }
-    }
 
     suspend fun getPyzVersion(): String? {
         return withContext(Dispatchers.IO) {

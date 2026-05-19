@@ -1,31 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    activity_main.xml — Payload Toolkit (Repack Edition)
+    activity_main.xml — Payload Toolkit
 
-    Single-purpose layout: Repack partition images into flashable OTA ZIP.
+    Single-purpose: Repack partition images (.img) into flashable OTA ZIP.
 
-    Layout structure:
+    Layout:
     ┌─────────────────────────────────────────┐
-    │ TopAppBar (app title + version)         │
+    │ TopAppBar (title + version + theme btn) │
     ├─────────────────────────────────────────┤
-    │ ScrollView                               │
-    │ ┌─────────────────────────────────────┐ │
-    │ │ Add Images Button                   │ │
-    │ │ Partition List                      │ │
-    │ │   dd.img  (2.3 MB)                 │ │
-    │ │   odm.img (1.1 MB)                 │ │
-    │ │   dlkm.img (4.5 MB)                │ │
-    │ ├─────────────────────────────────────┤ │
-    │ │ Compression Dropdown                │ │
-    │ ├─────────────────────────────────────┤ │
-    │ │ Output Preview: flashable_dd_odm…  │ │
-    │ │ Output Dir (EditText + Browse)      │ │
-    │ ├─────────────────────────────────────┤ │
-    │ │ [REPACK] Button                     │ │
-    │ │ ProgressBar                         │ │
-    │ ├─────────────────────────────────────┤ │
-    │ │ Output Log                          │ │
-    │ └─────────────────────────────────────┘ │
+    │ Partitions Card                         │
+    │   Add Images / Remove All               │
+    │   Partition list (monospace)            │
+    ├─────────────────────────────────────────┤
+    │ Options Card                            │
+    │   Compression (spinner)                 │
+    │   Device codename (input)               │
+    ├─────────────────────────────────────────┤
+    │ Output Card                             │
+    │   Custom filename (optional)            │
+    │   Output preview                        │
+    │   Output directory + Browse             │
+    ├─────────────────────────────────────────┤
+    │ [REPACK TO OTA ZIP] + ProgressBar       │
+    ├─────────────────────────────────────────┤
+    │ Log Card (dark terminal)                │
     └─────────────────────────────────────────┘
 -->
 <androidx.coordinatorlayout.widget.CoordinatorLayout
@@ -50,6 +48,7 @@
             app:subtitle="@string/toolbar_subtitle"
             app:titleTextColor="?attr/colorOnSurface"
             app:subtitleTextColor="?attr/colorOnSurfaceVariant"
+            app:menu="@menu/toolbar_menu"
             style="@style/Widget.PayloadToolkit.Toolbar" />
 
     </com.google.android.material.appbar.AppBarLayout>
@@ -64,21 +63,22 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="16dp">
+            android:paddingHorizontal="16dp"
+            android:paddingTop="12dp"
+            android:paddingBottom="16dp">
 
-            <!-- ═══════════════════════════════════════════════════════ -->
-            <!-- Partition Images Section                                -->
-            <!-- ═══════════════════════════════════════════════════════ -->
+            <!-- ═══════════════════════════════════════════════════ -->
+            <!-- Partitions Card                                      -->
+            <!-- ═══════════════════════════════════════════════════ -->
 
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
+                android:layout_marginBottom="10dp"
                 app:cardCornerRadius="16dp"
                 app:cardElevation="0dp"
                 app:strokeWidth="1dp"
-                app:strokeColor="?attr/colorOutlineVariant"
-                app:cardBackgroundColor="?attr/colorSurfaceVariant">
+                app:strokeColor="?attr/colorOutlineVariant">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -91,7 +91,7 @@
                         android:layout_height="wrap_content"
                         android:text="@string/label_partitions"
                         style="@style/TextAppearance.PayloadToolkit.SectionTitle"
-                        android:layout_marginBottom="8dp" />
+                        android:layout_marginBottom="4dp" />
 
                     <TextView
                         android:id="@+id/textEmptyHint"
@@ -100,16 +100,16 @@
                         android:text="@string/hint_add_images_prompt"
                         android:textSize="13sp"
                         android:textColor="?attr/colorOnSurfaceVariant"
-                        android:layout_marginBottom="8dp"
+                        android:layout_marginBottom="10dp"
                         android:visibility="visible" />
 
-                    <!-- Add Images + Remove All buttons -->
+                    <!-- Add Images + Remove All -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
                         android:gravity="center_vertical"
-                        android:layout_marginBottom="12dp">
+                        android:layout_marginBottom="10dp">
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/buttonAddImages"
@@ -140,7 +140,7 @@
                         app:cardElevation="0dp"
                         app:strokeWidth="1dp"
                         app:strokeColor="?attr/colorOutlineVariant"
-                        app:cardBackgroundColor="?attr/colorSurface">
+                        app:cardBackgroundColor="?attr/colorSurfaceContainerLowest">
 
                         <TextView
                             android:id="@+id/textViewImageList"
@@ -159,15 +159,15 @@
 
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- ═══════════════════════════════════════════════════════ -->
-            <!-- Compression Section                                     -->
-            <!-- ═══════════════════════════════════════════════════════ -->
+            <!-- ═══════════════════════════════════════════════════ -->
+            <!-- Options Card (Compression + Device)                   -->
+            <!-- ═══════════════════════════════════════════════════ -->
 
             <com.google.android.material.card.MaterialCardView
-                android:id="@+id/cardCompression"
+                android:id="@+id/cardOptions"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
+                android:layout_marginBottom="10dp"
                 app:cardCornerRadius="16dp"
                 app:cardElevation="0dp"
                 app:strokeWidth="1dp"
@@ -179,11 +179,20 @@
                     android:orientation="vertical"
                     android:padding="16dp">
 
+                    <!-- Compression -->
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/label_compression"
                         style="@style/TextAppearance.PayloadToolkit.SectionTitle"
+                        android:layout_marginBottom="4dp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/description_compression"
+                        android:textSize="12sp"
+                        android:textColor="?attr/colorOnSurfaceVariant"
                         android:layout_marginBottom="8dp" />
 
                     <androidx.appcompat.widget.AppCompatSpinner
@@ -192,69 +201,53 @@
                         android:layout_height="48dp"
                         android:background="?attr/selectableItemBackground"
                         android:spinnerMode="dropdown"
-                        android:paddingStart="8dp"
+                        android:paddingStart="4dp"
                         android:paddingEnd="8dp" />
 
-                </LinearLayout>
+                    <!-- Divider -->
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="?attr/colorOutlineVariant"
+                        android:layout_marginTop="14dp"
+                        android:layout_marginBottom="14dp" />
 
-            </com.google.android.material.card.MaterialCardView>
-
-            <!-- ═══════════════════════════════════════════════════════ -->
-            <!-- Device Info (Device Codename)                           -->
-            <!-- ═══════════════════════════════════════════════════════ -->
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/cardDeviceMeta"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                app:cardCornerRadius="16dp"
-                app:cardElevation="0dp"
-                app:strokeWidth="1dp"
-                app:strokeColor="?attr/colorOutlineVariant">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
+                    <!-- Device codename -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
                         android:gravity="center_vertical"
-                        android:layout_marginBottom="12dp">
+                        android:layout_marginBottom="8dp">
 
                         <TextView
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="DEVICE"
+                            android:text="@string/label_device"
                             style="@style/TextAppearance.PayloadToolkit.SectionTitle" />
 
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Optional — default: generic"
+                            android:text="@string/hint_device_optional"
                             android:textSize="11sp"
                             android:textColor="?attr/colorOnSurfaceVariant" />
 
                     </LinearLayout>
 
-                    <!-- Device codename -->
                     <com.google.android.material.textfield.TextInputLayout
                         android:id="@+id/layoutDevice"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:hint="Device codename"
+                        android:hint="@string/hint_device_codename"
                         app:boxBackgroundColor="?attr/colorSurface"
                         app:boxCornerRadiusTopStart="12dp"
                         app:boxCornerRadiusTopEnd="12dp"
                         app:boxCornerRadiusBottomStart="12dp"
                         app:boxCornerRadiusBottomEnd="12dp"
                         app:boxStrokeColor="?attr/colorOutline"
-                        app:helperText="e.g. crosshatch, S666LN-OP, generic"
+                        app:helperText="@string/helper_device_codename"
                         app:helperTextEnabled="true">
 
                         <com.google.android.material.textfield.TextInputEditText
@@ -271,14 +264,14 @@
 
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- ═══════════════════════════════════════════════════════ -->
-            <!-- Output Preview + Directory                              -->
-            <!-- ═══════════════════════════════════════════════════════ -->
+            <!-- ═══════════════════════════════════════════════════ -->
+            <!-- Output Card                                          -->
+            <!-- ═══════════════════════════════════════════════════ -->
 
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
+                android:layout_marginBottom="10dp"
                 app:cardCornerRadius="16dp"
                 app:cardElevation="0dp"
                 app:strokeWidth="1dp"
@@ -295,14 +288,14 @@
                         android:layout_height="wrap_content"
                         android:text="@string/label_output"
                         style="@style/TextAppearance.PayloadToolkit.SectionTitle"
-                        android:layout_marginBottom="8dp" />
+                        android:layout_marginBottom="6dp" />
 
                     <!-- Custom filename input -->
                     <com.google.android.material.textfield.TextInputLayout
                         android:id="@+id/layoutCustomFilename"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginBottom="8dp"
+                        android:layout_marginBottom="6dp"
                         android:hint="@string/hint_custom_filename"
                         app:boxBackgroundColor="?attr/colorSurface"
                         app:boxCornerRadiusTopStart="12dp"
@@ -332,15 +325,15 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:text=""
-                        android:textSize="14sp"
+                        android:textSize="13sp"
                         android:textColor="?attr/colorPrimary"
                         android:fontFamily="monospace"
                         android:textStyle="bold"
-                        android:layout_marginBottom="12dp"
+                        android:layout_marginBottom="10dp"
                         android:maxLines="2"
                         android:ellipsize="middle" />
 
-                    <!-- Output directory -->
+                    <!-- Output directory + Browse -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -387,18 +380,19 @@
 
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- ═══════════════════════════════════════════════════════ -->
-            <!-- Repack Button + Progress Bar                            -->
-            <!-- ═══════════════════════════════════════════════════════ -->
+            <!-- ═══════════════════════════════════════════════════ -->
+            <!-- Repack Button + Progress Bar                        -->
+            <!-- ═══════════════════════════════════════════════════ -->
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/buttonExecute"
                 android:layout_width="match_parent"
-                android:layout_height="56dp"
+                android:layout_height="52dp"
                 android:text="@string/button_repack"
-                android:textSize="16sp"
+                android:textSize="15sp"
+                android:layout_marginTop="2dp"
                 android:layout_marginBottom="8dp"
-                app:cornerRadius="16dp"
+                app:cornerRadius="14dp"
                 app:icon="@android:drawable/ic_media_play"
                 app:iconGravity="textStart" />
 
@@ -408,18 +402,17 @@
                 android:layout_height="wrap_content"
                 android:indeterminate="true"
                 android:visibility="gone"
-                android:layout_marginBottom="12dp"
+                android:layout_marginBottom="10dp"
                 app:indicatorColor="?attr/colorPrimary"
                 app:trackColor="?attr/colorSurfaceVariant" />
 
-            <!-- ═══════════════════════════════════════════════════════ -->
-            <!-- Log Output Section                                      -->
-            <!-- ═══════════════════════════════════════════════════════ -->
+            <!-- ═══════════════════════════════════════════════════ -->
+            <!-- Log Output (terminal-style)                         -->
+            <!-- ═══════════════════════════════════════════════════ -->
 
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:layout_marginBottom="12dp"
                 app:cardCornerRadius="16dp"
                 app:cardElevation="0dp"
                 app:strokeWidth="1dp"
@@ -431,19 +424,20 @@
                     android:layout_height="wrap_content"
                     android:orientation="vertical">
 
-                    <!-- Log header -->
+                    <!-- Log header bar -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
                         android:gravity="center_vertical"
-                        android:padding="12dp">
+                        android:paddingHorizontal="12dp"
+                        android:paddingVertical="10dp">
 
                         <TextView
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="OUTPUT LOG"
+                            android:text="@string/label_output_log"
                             android:textSize="12sp"
                             android:textAllCaps="true"
                             android:letterSpacing="0.08"
@@ -477,9 +471,9 @@
                     <View
                         android:layout_width="match_parent"
                         android:layout_height="1dp"
-                        android:background="#333333" />
+                        android:background="@color/log_divider" />
 
-                    <!-- Scrollable log output -->
+                    <!-- Scrollable log -->
                     <ScrollView
                         android:id="@+id/scrollViewLog"
                         android:layout_width="match_parent"
@@ -507,11 +501,6 @@
                 </LinearLayout>
 
             </com.google.android.material.card.MaterialCardView>
-
-            <!-- Bottom spacer -->
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="16dp" />
 
         </LinearLayout>
 
