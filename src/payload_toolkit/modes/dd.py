@@ -117,14 +117,13 @@ def _build_header(compress_id, num_parts):
 
 
 def _build_update_script(num_parts, compress_id, compress_name, partitions_meta,
-                            device="", skip_verify=False, backup=False, compress_level=None):
+                            device="", skip_verify=False, compress_level=None):
     """Build the META-INF/com/google/android/update-binary shell script.
 
     partitions_meta: list of dicts with keys:
         name, unc_size, hash_hex, comp_size, data_offset
     device: device codename(s), comma-separated (optional, for target validation)
     skip_verify: if True, skip post-flash SHA-256 hash verification
-    backup: if True, dump current partitions before flashing
     compress_level: compression level used (informational, shown in header)
     """
     # Build partition variable assignments
@@ -143,7 +142,7 @@ def _build_update_script(num_parts, compress_id, compress_name, partitions_meta,
 
     # Calculate step numbers dynamically based on enabled features
     # Base: Step 0 (extract) + 1 (decompressor) + 2 (integrity)
-    # Optional: 3 (device) + 4 (backup) → shifts slot/validation/flash
+    # Optional: 3 (device) → shifts slot/validation/flash
     extract_step = 0
     decomp_step = 1
     integrity_step = 2
@@ -152,11 +151,6 @@ def _build_update_script(num_parts, compress_id, compress_name, partitions_meta,
     device_check_block = ""
     if device:
         device_check_step = step
-        step += 1
-    backup_step = None
-    backup_block = ""
-    if backup:
-        backup_step = step
         step += 1
     slot_step = step
     step += 1
@@ -203,35 +197,6 @@ fi
 ui_print ""
 '''
 
-    # Backup step — dump current partitions before flashing
-    backup_dir = "/tmp/ddbackup"
-    if backup:
-        backup_block = f'''
-# ── Step {backup_step}: Pre-flash backup ────────────────────────────
-ui_print "[Step {backup_step}/{total_steps}] Backing up current partitions..."
-
-BACKUP_DIR="{backup_dir}"
-rm -rf "$BACKUP_DIR"
-mkdir -p "$BACKUP_DIR"
-
-for i in $(seq 0 $(( NUM_PARTS - 1 ))); do
-    eval "PNAME=\\$PART_{{${{i}}}}_NAME"
-    eval "PSIZE=\\$PART_{{${{i}}}}_UNC_SIZE"
-    PTARGET=$(resolve_target "$PNAME")
-
-    ui_print "  Backing up $PNAME from $PTARGET..."
-    dd if="$PTARGET" of="$BACKUP_DIR/${{PNAME}}.img" bs=4096 2>/dev/null
-    if [ $? -eq 0 ]; then
-        BSIZE=$(wc -c < "$BACKUP_DIR/${{PNAME}}.img")
-        ui_print "  $PNAME backup: $(( BSIZE / 1048576 )) MB [OK]"
-    else
-        ui_print "! WARNING: Failed to backup $PNAME (continuing...)"
-    fi
-done
-ui_print "  Backups saved to $BACKUP_DIR/"
-ui_print ""
-'''
-
     # Header info line
     header_info_parts = ", ".join(p["name"] for p in partitions_meta)
     header_info = f"Partitions: {header_info_parts}"
@@ -243,8 +208,6 @@ ui_print ""
         header_info += f" | Compress: {compress_name}"
     if skip_verify:
         header_info += " | NoVerify"
-    if backup:
-        header_info += " | Backup"
 
     # Pre-build conditional shell blocks for Done section
     if skip_verify:
@@ -253,8 +216,6 @@ ui_print ""
     else:
         done_status_block = '''ui_print " All $NUM_PARTS partition(s) flashed"
     ui_print " and verified successfully!"'''
-
-    backup_done_line = 'ui_print " Backups: %s/"\n' % backup_dir if backup else ""
 
     script = f'''#!/sbin/sh
 # {BANNER}
@@ -414,7 +375,7 @@ fi
 ui_print "  Version=$HDR_VERSION Compress=$HDR_COMPRESS Parts=$HDR_NUM_PARTS"
 ui_print "  Header=$HDR_HDR_SIZE DataOffset=$DATA_OFFSET"
 ui_print ""
-{device_check_block}{backup_block}
+{device_check_block}
 # ── Step {slot_step}: Slot detection ──────────────────────────
 ui_print "[Step {slot_step}/{total_steps}] Slot detection..."
 
@@ -612,14 +573,14 @@ done
 # ── Done ────────────────────────────────────────────────────
 ui_print "──────────────────────────────────────────"
 {done_status_block}
-{backup_done_line}ui_print ""
+ui_print ""
 exit 0
 '''
     return script
 
 
 def _build_flash_info(version, compress_name, bundle_size, num_parts, partitions_meta,
-                       device="", skip_verify=False, backup=False, compress_level=None):
+                       device="", skip_verify=False, compress_level=None):
     """Build the flash_info.txt human-readable metadata."""
     lines = [
         "Renuked v3 — dd-based partition flasher",
@@ -635,8 +596,6 @@ def _build_flash_info(version, compress_name, bundle_size, num_parts, partitions
         lines.append(f"Target device: {device}")
     if skip_verify:
         lines.append("Post-flash verification: SKIPPED")
-    if backup:
-        lines.append("Pre-flash backup: ENABLED (/tmp/ddbackup/)")
     lines.append("")
     for p in partitions_meta:
         lines.append(f"  [{p['name']}]")
@@ -668,7 +627,6 @@ def run(*args, **kwargs):
     output_path     : str   — Path for output .zip file
     device          : str   — Device codename(s), comma-separated (optional)
     skip_verify     : bool  — Skip post-flash SHA-256 verification (default False)
-    backup          : bool  — Dump current partitions before flashing (default False)
 
     Returns
     -------
@@ -687,7 +645,6 @@ def run(*args, **kwargs):
     output_path = str(params.get("output_path", "flashable_dd.zip"))
     device = str(params.get("device", ""))
     skip_verify = bool(params.get("skip_verify", False))
-    backup = bool(params.get("backup", False))
 
     lines = []
     t0 = time.time()
@@ -742,8 +699,6 @@ def run(*args, **kwargs):
             lines.append(f"Device: {device}")
         if skip_verify:
             lines.append(f"Verification: SKIPPED")
-        if backup:
-            lines.append(f"Pre-flash backup: ENABLED")
         lines.append("")
 
         # ── Step 1: Build ddbundle.bin ──
@@ -802,12 +757,12 @@ def run(*args, **kwargs):
 
         update_binary = _build_update_script(
             num_parts, compress_id, compress_name, partitions_meta,
-            device=device, skip_verify=skip_verify, backup=backup, compress_level=compress_level
+            device=device, skip_verify=skip_verify, compress_level=compress_level
         )
         updater_script = "#Mtk client script\n"
         flash_info = _build_flash_info(
             "3", compress_name, bundle_size, num_parts, partitions_meta,
-            device=device, skip_verify=skip_verify, backup=backup, compress_level=compress_level
+            device=device, skip_verify=skip_verify, compress_level=compress_level
         )
 
         lines.append(f"  update-binary: {len(update_binary):,} bytes")

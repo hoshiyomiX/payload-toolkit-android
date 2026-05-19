@@ -242,7 +242,7 @@ class MainActivity : AppCompatActivity() {
         val mode = prefs.getString("pref_theme_mode", "system") ?: "system"
         item.setIcon(when (mode) {
             "light" -> android.R.drawable.ic_menu_day // sun
-            "dark" -> android.R.drawable.ic_menu_night // moon
+            "dark" -> android.R.drawable.ic_menu_view // moon
             else -> android.R.drawable.ic_menu_manage // auto/system
         })
     }
@@ -258,13 +258,6 @@ class MainActivity : AppCompatActivity() {
         switchSkipVerify?.isChecked = prefs.getBoolean("pref_skip_verify", false)
         switchSkipVerify?.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit { putBoolean("pref_skip_verify", isChecked) }
-        }
-
-        // Pre-flash backup toggle
-        val switchBackup = findViewById<com.google.android.material.switchmaterial.SwitchMaterial>(R.id.switchBackup)
-        switchBackup?.isChecked = prefs.getBoolean("pref_backup", false)
-        switchBackup?.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit { putBoolean("pref_backup", isChecked) }
         }
     }
 
@@ -680,9 +673,7 @@ class MainActivity : AppCompatActivity() {
 
         // Read toggle states
         val skipVerify = prefs.getBoolean("pref_skip_verify", false)
-        val backup = prefs.getBoolean("pref_backup", false)
         if (skipVerify) showLog(" | Verification: SKIPPED")
-        if (backup) showLog(" | Backup: ON")
         showLog("\n\n")
 
         return PayloadBridge.dd(
@@ -691,7 +682,6 @@ class MainActivity : AppCompatActivity() {
             compression = selectedCompression,
             compressionLevel = selectedCompressLevel,
             skipVerify = skipVerify,
-            backup = backup,
             outputPath = outPath
         )
     }

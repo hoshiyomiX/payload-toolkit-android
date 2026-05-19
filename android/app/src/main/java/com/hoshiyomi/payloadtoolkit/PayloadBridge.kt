@@ -88,7 +88,6 @@ object PayloadBridge {
      * @param compression Compression algorithm: none, gzip, bzip2, or xz
      * @param compressionLevel Compression level (algorithm-specific range, null=default)
      * @param skipVerify Skip post-flash SHA-256 hash verification
-     * @param backup Dump current partitions before flashing (in recovery)
      * @param outputPath Absolute path to output .zip file
      */
     suspend fun dd(
@@ -97,7 +96,6 @@ object PayloadBridge {
         compression: String = "gzip",
         compressionLevel: Int? = null,
         skipVerify: Boolean = false,
-        backup: Boolean = false,
         outputPath: String
     ): PayloadResult {
         if (images.isEmpty()) return PayloadResult.error("No images specified for DD ZIP")
@@ -132,9 +130,6 @@ object PayloadBridge {
         }
         if (skipVerify) {
             args.add("--skip-verify")
-        }
-        if (backup) {
-            args.add("--backup")
         }
         if (device.isNotBlank() && device != "generic") {
             args.add("--device")

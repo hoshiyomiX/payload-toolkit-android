@@ -83,7 +83,6 @@ def _print_help(version):
     print("  --device <codename>   Device codename (dd mode, comma-sep for multi)")
     print("  --compress-level <N>  Compression level (dd mode)")
     print("  --skip-verify         Skip post-flash SHA-256 verification (dd mode)")
-    print("  --backup              Dump partitions before flashing (dd mode)")
     print("  -v, --verbose         Verbose output")
     print("  --version             Show version")
     print("  --check-deps          Check Python dependency availability")
@@ -145,8 +144,6 @@ def main():
             opts["compress_level"] = args[i + 1]; i += 1
         elif a == "--skip-verify":
             opts["skip_verify"] = True
-        elif a == "--backup":
-            opts["backup"] = True
         elif a == "--image" and i + 1 < len(args):
             opts.setdefault("images", []).append(args[i + 1]); i += 1
         elif a == "--partition" and i + 1 < len(args):
@@ -232,8 +229,6 @@ def main():
             params["compress_level"] = int(opts["compress_level"])
         if opts.get("skip_verify"):
             params["skip_verify"] = True
-        if opts.get("backup"):
-            params["backup"] = True
 
     elif mode == "sign":
         if "input" not in opts:

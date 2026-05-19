@@ -42,8 +42,6 @@
     <!-- Toggle options -->
     <string name="label_skip_verify">Skip post-flash verification</string>
     <string name="helper_skip_verify">Disable SHA-256 hash check after flashing for faster writes. Data integrity won\'t be verified.</string>
-    <string name="label_backup">Pre-flash backup</string>
-    <string name="helper_backup">Dump current partitions to /tmp/ddbackup/ before flashing. Recovery already has root access.</string>
 
     <!-- Log section -->
     <string name="label_output_log">Output Log</string>

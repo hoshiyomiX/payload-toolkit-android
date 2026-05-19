@@ -328,25 +328,6 @@
                         android:text="@string/helper_skip_verify"
                         android:textSize="11sp"
                         android:textColor="?attr/colorOnSurfaceVariant"
-                        android:layout_marginBottom="8dp" />
-
-                    <!-- Pre-flash backup toggle -->
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchBackup"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/label_backup"
-                        android:textSize="14sp"
-                        android:layout_marginTop="4dp"
-                        android:layout_marginBottom="2dp"
-                        app:thumbTint="?attr/colorPrimary" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/helper_backup"
-                        android:textSize="11sp"
-                        android:textColor="?attr/colorOnSurfaceVariant"
                         android:layout_marginBottom="4dp" />
 
                 </LinearLayout>
