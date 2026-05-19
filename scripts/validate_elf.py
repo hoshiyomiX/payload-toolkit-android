@@ -234,30 +234,81 @@ def fix_needed(path, old_name, new_name):
     return False
 
 
+def get_dt_needed_list(data):
+    """Parse DT_NEEDED entries directly from ELF binary data.
+
+    Returns list of needed library names.  Uses struct-based parsing of
+    the .dynamic section and .dynstr — no external tools required.
+    This is more reliable than `patchelf --print-needed` because it
+    works even on files that patchelf cannot read after section growth.
+    """
+    result = _find_dynamic_and_strtab(data)
+    if result is None:
+        return []
+    dynamic_off, dynamic_size, strtab_off, strsz = result
+
+    needed = []
+    pos = dynamic_off
+    while pos + 16 <= min(dynamic_off + dynamic_size, len(data)):
+        d_tag = struct.unpack_from('<Q', data, pos)[0]
+        d_val = struct.unpack_from('<Q', data, pos + 8)[0]
+        if d_tag == DT_NULL:
+            break
+        if d_tag == DT_NEEDED:
+            # d_val is offset into .dynstr for the needed lib name
+            str_start = int(d_val)
+            if str_start < strtab_off or str_start >= strtab_off + strsz:
+                pos += 16
+                continue
+            try:
+                str_end = data.index(0, str_start, strtab_off + strsz)
+                name = data[str_start:str_end].decode('ascii', errors='replace')
+                needed.append(name)
+            except (ValueError, IndexError):
+                pass
+        pos += 16
+    return needed
+
+
 def fix_needed_all(path, jni_dir):
     """Patch ALL versioned DT_NEEDED entries to unversioned.
-    Uses patchelf --print-needed to discover entries, then binary-patches
-    .dynstr for files too small for patchelf (< 8KB).
+
+    Parses DT_NEEDED directly from the ELF binary (no patchelf dependency)
+    and patches strings in-place in .dynstr.  This modifies the ORIGINAL
+    string that both DT_NEEDED and .gnu.version_r reference, so there
+    is no verneed mismatch after patching.
 
     Returns count of patched entries.
     """
-    import subprocess
     try:
-        result = subprocess.run(
-            ['patchelf', '--print-needed', path],
-            capture_output=True, text=True, timeout=10)
-        needed_list = [n for n in result.stdout.strip().split('\n') if n and '.so' in n]
+        with open(path, 'r+b') as f:
+            data = bytearray(f.read())
     except Exception:
         return 0
 
+    result = _find_dynamic_and_strtab(data)
+    if result is None:
+        return 0
+    dynamic_off, dynamic_size, strtab_off, strsz = result
+
+    # Parse DT_NEEDED entries directly from binary
+    needed_list = get_dt_needed_list(data)
+    if not needed_list:
+        return 0
+
     patched = 0
-    for needed in needed_list:
-        if '.so.' not in needed:
+    for needed_name in needed_list:
+        if '.so.' not in needed_name:
             continue
-        unversioned = needed.split('.so.')[0] + '.so'
+        unversioned = needed_name.split('.so.')[0] + '.so'
         if os.path.isfile(os.path.join(jni_dir, unversioned)):
-            if fix_needed(path, needed, unversioned):
+            if _str_replace_in_place(data, strtab_off, strsz, needed_name, unversioned):
                 patched += 1
+
+    if patched > 0:
+        with open(path, 'wb') as f:
+            f.write(data)
+
     return patched
 
 
@@ -295,6 +346,33 @@ def main():
         sys.exit(1)
     else:
         print(f"    [OK] All {checked} .so files pass PT_LOAD/PT_DYNAMIC validation")
+
+
+# -- DT_NEEDED audit mode ----------------------------------------------
+# Usage: python3 validate_elf.py --audit-needed <directory>
+# Scans all .so files and lists any versioned DT_NEEDED entries.
+if __name__ == '__main__' and len(sys.argv) >= 3 and sys.argv[1] == '--audit-needed':
+    audit_dir = sys.argv[2]
+    found = 0
+    for name in sorted(os.listdir(audit_dir)):
+        if not name.endswith('.so'):
+            continue
+        path = os.path.join(audit_dir, name)
+        try:
+            with open(path, 'rb') as f:
+                data = bytearray(f.read())
+        except Exception:
+            continue
+        needed_list = get_dt_needed_list(data)
+        for n in needed_list:
+            if '.so.' in n:
+                print(f"    VERSIONED: {name} needs {n}")
+                found += 1
+    if found == 0:
+        print(f"    [OK] No versioned DT_NEEDED entries found")
+    else:
+        print(f"    WARNING: {found} versioned DT_NEEDED entries remain")
+    sys.exit(0 if found == 0 else 1)
 
 
 if __name__ == '__main__':

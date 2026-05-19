@@ -156,8 +156,12 @@ static wchar_t *utf8_to_wcs(const char *utf8)
 
 static void preload_native_libs(const char *lib_dir) {
     DIR *dir = opendir(lib_dir);
-    if (!dir) return;
+    if (!dir) {
+        fprintf(stderr, "[pybridge] preload: cannot open %s\n", lib_dir);
+        return;
+    }
 
+    int loaded = 0, failed = 0;
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
         const char *name = entry->d_name;
@@ -170,9 +174,16 @@ static void preload_native_libs(const char *lib_dir) {
         char path[1024];
         snprintf(path, sizeof(path), "%s/%s", lib_dir, name);
         /* RTLD_LAZY: don't resolve transitive deps now */
-        dlopen(path, RTLD_LAZY | RTLD_GLOBAL);
+        void *h = dlopen(path, RTLD_LAZY | RTLD_GLOBAL);
+        if (h) {
+            loaded++;
+        } else {
+            fprintf(stderr, "[pybridge] preload FAIL: %s: %s\n", name, dlerror());
+            failed++;
+        }
     }
     closedir(dir);
+    fprintf(stderr, "[pybridge] preload: %d loaded, %d failed\n", loaded, failed);
 }
 
 /* ═══════════════════════════════════════════════════════════════

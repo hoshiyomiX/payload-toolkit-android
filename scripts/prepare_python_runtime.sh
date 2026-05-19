@@ -274,6 +274,18 @@ for so_file in "$JNI_DIR"/*.so; do
     FILENAME=$(basename "$so_file")
     SONAME_CURRENT=$(patchelf --print-soname "$so_file" 2>/dev/null || true)
     SONAME_OK=0
+
+    # CRITICAL: Only patch DT_SONAME if the file ALREADY has one.
+    # Extension modules (zlib.cpython-313-*.so, etc.) typically do NOT
+    # have DT_SONAME.  Running patchelf --set-soname on them ADDS a new
+    # .dynamic entry, which grows the section and can corrupt the ELF
+    # (no padding space).  This caused the DT_NEEDED patcher to fail
+    # silently on zlib.cpython-313-*.so, leaving "libz.so.1" intact.
+    if [ -z "$SONAME_CURRENT" ]; then
+        # No DT_SONAME — skip.  Extension modules don't need it.
+        continue
+    fi
+
     if [ "$SONAME_CURRENT" = "$FILENAME" ]; then
         SONAME_OK=1
     elif patchelf --set-soname "$FILENAME" "$so_file" 2>/dev/null && \
@@ -292,12 +304,6 @@ sys.exit(0 if fix_soname('$so_file', '$FILENAME') else 1)" 2>/dev/null; then
         SONAME_REMOVED=$((SONAME_REMOVED + 1))
     fi
 
-    # NOTE: We do NOT use patchelf --replace-needed here because it adds a
-    # NEW string to .dynstr and changes DT_NEEDED to point to it.  This
-    # breaks the .gnu.version_r (verneed) section, which still references
-    # the ORIGINAL string.  Android's bionic linker uses verneed for
-    # resolution, so DT_NEEDED and verneed must agree on the same string.
-    # Instead, we patch DT_NEEDED in-place via Python (Step 3b below).
 done
 echo "    Renamed $SONAME_REMOVED DT_SONAME -> filename"
 echo "    Skipped $PATCHELF_SKIPPED files (< ${PATCHELF_MIN_SIZE} bytes, patchelf unsafe)"
@@ -318,6 +324,11 @@ echo "    Skipped $PATCHELF_SKIPPED files (< ${PATCHELF_MIN_SIZE} bytes, patchel
 # DT_NEEDED and verneed see the same updated string.  This works
 # because the new name is always shorter (libz.so.1 → libz.so).
 # No section growth, no corruption, no verneed mismatch.
+#
+# V3.19: Rewrote fix_needed_all() to parse DT_NEEDED directly from
+# the ELF binary (no patchelf dependency).  Previous version used
+# `patchelf --print-needed` which could fail silently on files that
+# were corrupted by patchelf --set-soname adding new entries.
 echo "    Patching DT_NEEDED (versioned -> unversioned) in all files..."
 PYTHON_NEEDED=0
 PYTHON_NEEDED_FILES=0
@@ -327,13 +338,23 @@ for so_file in "$JNI_DIR"/*.so; do
     PATCHED=$(python3 -c "
 import sys; sys.path.insert(0, '$SCRIPT_DIR')
 from validate_elf import fix_needed_all
-print(fix_needed_all('$so_file', '$JNI_DIR'))" 2>/dev/null || echo 0)
+print(fix_needed_all('$so_file', '$JNI_DIR'))")
+    PATCHED=${PATCHED:-0}
     if [ "$PATCHED" -gt 0 ]; then
+        echo "      $FILENAME: patched $PATCHED DT_NEEDED"
         PYTHON_NEEDED=$((PYTHON_NEEDED + PATCHED))
         PYTHON_NEEDED_FILES=$((PYTHON_NEEDED_FILES + 1))
     fi
 done
 echo "    Python patcher: patched $PYTHON_NEEDED DT_NEEDED in $PYTHON_NEEDED_FILES files"
+
+# Step 3c: DT_NEEDED audit — verify NO versioned DT_NEEDED remain.
+# Uses binary parsing (no patchelf) to check the actual .dynstr content.
+echo "    Auditing DT_NEEDED for remaining versioned entries..."
+if ! python3 "$SCRIPT_DIR/validate_elf.py" --audit-needed "$JNI_DIR"; then
+    echo "    WARNING: Versioned DT_NEEDED entries remain after patching!"
+    echo "    These may cause runtime dlopen failures on Android."
+fi
 
 # Step 4b: Post-patchelf ELF integrity validation ------------------------
 # patchelf modifies ELF sections (DYNAMIC, dynstr).  On .so files with
@@ -448,7 +469,7 @@ for so_file in "$JNI_DIR"/*.so; do
         else
             unversioned="$needed"
         fi
-        if [ ! -f "$JNI_DIR/$unversioned" ]; then
+        if [ ! -f "$JNI_DIR/$unversioned" ] && [ ! -f "$JNI_DIR/$needed" ]; then
             echo "    FAIL: $(basename "$so_file") needs $needed (not in jniLibs)"
             FINAL_ISSUES=$((FINAL_ISSUES + 1))
         fi
