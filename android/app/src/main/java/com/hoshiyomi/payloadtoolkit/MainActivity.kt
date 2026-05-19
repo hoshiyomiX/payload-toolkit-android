@@ -212,6 +212,11 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
+    override fun onPrepareOptionsMenu(menu: android.view.Menu): Boolean {
+        updateThemeIcon(menu)
+        return super.onPrepareOptionsMenu(menu)
+    }
+
     override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
         return when (item.itemId) {
             R.id.action_toggle_theme -> {
@@ -241,9 +246,9 @@ class MainActivity : AppCompatActivity() {
         val item = menu?.findItem(R.id.action_toggle_theme) ?: return
         val mode = prefs.getString("pref_theme_mode", "system") ?: "system"
         item.setIcon(when (mode) {
-            "light" -> android.R.drawable.ic_menu_day // sun
-            "dark" -> android.R.drawable.ic_menu_view // moon
-            else -> android.R.drawable.ic_menu_manage // auto/system
+            "light" -> R.drawable.ic_theme_light
+            "dark" -> R.drawable.ic_theme_dark
+            else -> R.drawable.ic_theme_auto
         })
     }
 
