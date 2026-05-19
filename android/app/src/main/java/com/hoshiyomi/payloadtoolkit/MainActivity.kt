@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import androidx.core.content.edit
 
 /**
  * MainActivity — Payload Toolkit Android.
@@ -52,6 +53,9 @@ class MainActivity : AppCompatActivity() {
     // App-internal directories
     private lateinit var inputDir: File
     private lateinit var outputDir: File
+
+    // SharedPreferences for persisting user settings
+    private val prefs by lazy { getSharedPreferences("payload_toolkit", Context.MODE_PRIVATE) }
 
     // ═══════════════════════════════════════════════════════════════
     //  Activity Result Launchers
@@ -102,6 +106,7 @@ class MainActivity : AppCompatActivity() {
         setupCompressionSelector()
         setupButtons()
         setupToolbar()
+        setupDeviceMetaFields()
 
         requestStoragePermissions()
         handleIncomingIntent(intent)
@@ -176,6 +181,15 @@ class MainActivity : AppCompatActivity() {
         setSupportActionBar(toolbar)
         supportActionBar?.title = getString(R.string.app_name)
         supportActionBar?.subtitle = "v${BuildConfig.VERSION_NAME}"
+    }
+
+    private fun setupDeviceMetaFields() {
+        val editDevice = findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.editTextDevice)
+        val editFingerprint = findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.editTextFingerprint)
+
+        // Restore persisted values (or keep empty for defaults)
+        editDevice?.setText(prefs.getString("device", ""))
+        editFingerprint?.setText(prefs.getString("fingerprint", ""))
     }
 
     private fun setupCompressionSelector() {
@@ -418,8 +432,28 @@ class MainActivity : AppCompatActivity() {
         showLog("Compression: $selectedCompression\n")
         showLog("Output: $outputFileName\n\n")
 
+        // Read device metadata from UI fields (empty = use defaults)
+        val deviceInput = findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.editTextDevice)
+            ?.text?.toString()?.trim() ?: ""
+        val fingerprintInput = findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.editTextFingerprint)
+            ?.text?.toString()?.trim() ?: ""
+
+        // Persist values for next launch
+        prefs.edit { putString("device", deviceInput); putString("fingerprint", fingerprintInput) }
+
+        // Use non-empty user input, otherwise PayloadBridge defaults apply
+        val device = deviceInput.ifEmpty { "aosp_crosshatch,Generic AOSP" }
+        val fingerprint = fingerprintInput.ifEmpty {
+            "AOSP/crosshatch/crosshatch:14/AP2A.240805.005/11572411:user/release-keys"
+        }
+
+        showLog("Device: $device\n")
+        showLog("Fingerprint: $fingerprint\n\n")
+
         return PayloadBridge.zip(
             images = images,
+            device = device,
+            fingerprint = fingerprint,
             compression = selectedCompression,
             outputPath = outPath
         )
