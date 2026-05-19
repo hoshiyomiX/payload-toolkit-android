@@ -128,7 +128,11 @@ class MainActivity : AppCompatActivity() {
                                 val pb = ProcessBuilder(it, "--version")
                                     .redirectErrorStream(true)
                                     .start()
-                                pb.inputStream.bufferedReader().readText().trim()
+                                val raw = pb.inputStream.bufferedReader().readText().trim()
+                                pb.waitFor()
+                                if (result.isBundled) raw.lineSequence()
+                                    .filterNot { it.contains("CANNOT LINK EXECUTABLE") }
+                                    .joinToString("\n") else raw
                             } catch (_: Exception) { "unknown" }
                         }
                         val source = if (result.isBundled) "bundled" else "system"
