@@ -10,7 +10,7 @@ Called from Kotlin via Chaquopy:
     )
 
 ddbundle format:
-    ddbundle.bin  — DDBU header (4096 bytes, padded) + compressed partition data
+    nukedcode.bin  — DDBU header (4096 bytes, padded) + compressed partition data
                     Header: magic "DDBU" (4B) + version (u16) + compress_id (u16)
                           + num_parts (u16) + header_size (u16) + padding to 4096
                     Data:   each partition compressed, padded to 4096 alignment
@@ -92,7 +92,7 @@ def _human_size(size_bytes):
 
 
 def _build_header(compress_id, num_parts):
-    """Build the 4096-byte ddbundle.bin header.
+    """Build the 4096-byte nukedcode.bin header.
 
     Header layout (first 12 bytes, all little-endian):
         Offset  Size  Field
@@ -232,7 +232,7 @@ ui_print() {{
     echo "ui_print" >&$OUTFD
 }}
 
-BUNDLE="/tmp/ddbundle.bin"
+BUNDLE="/tmp/nukedcode.bin"
 {chr(10).join(part_vars)}
 NUM_PARTS={num_parts}
 COMPRESS_ID={compress_id}
@@ -241,8 +241,8 @@ ui_print ""
 {chr(10).join(line.strip() for line in BANNER.strip().splitlines())}
 ui_print ""
 
-# ── Step 0: Extract ddbundle.bin from ZIP ──────────────────
-ui_print "[Step {extract_step}/{total_steps}] Extracting ddbundle.bin..."
+# ── Step 0: Extract nukedcode.bin from ZIP ──────────────────
+ui_print "[Step {extract_step}/{total_steps}] Extracting nukedcode.bin..."
 
 rm -f "$BUNDLE"
 if [ ! -f "$ZIPFILE" ]; then
@@ -251,25 +251,25 @@ if [ ! -f "$ZIPFILE" ]; then
 fi
 
 # TWRP/OrangeFox only auto-extracts update-binary. We must extract
-# ddbundle.bin ourselves from the flashable ZIP.
+# nukedcode.bin ourselves from the flashable ZIP.
 EXTRACT_OK=0
 # Method 1: unzip
 if which unzip >/dev/null 2>&1; then
-    unzip -o -j "$ZIPFILE" ddbundle.bin -d /tmp/ >/dev/null 2>&1 && EXTRACT_OK=1
+    unzip -o -j "$ZIPFILE" nukedcode.bin -d /tmp/ >/dev/null 2>&1 && EXTRACT_OK=1
 fi
 # Method 2: busybox unzip
 if [ "$EXTRACT_OK" = "0" ] && busybox --list 2>/dev/null | grep -q "^unzip$"; then
-    busybox unzip -o -j "$ZIPFILE" ddbundle.bin -d /tmp/ >/dev/null 2>&1 && EXTRACT_OK=1
+    busybox unzip -o -j "$ZIPFILE" nukedcode.bin -d /tmp/ >/dev/null 2>&1 && EXTRACT_OK=1
 fi
 # Method 3: toybox (some recoveries)
 if [ "$EXTRACT_OK" = "0" ] && toybox unzip --help >/dev/null 2>&1; then
-    toybox unzip -o -j "$ZIPFILE" ddbundle.bin -d /tmp/ >/dev/null 2>&1 && EXTRACT_OK=1
+    toybox unzip -o -j "$ZIPFILE" nukedcode.bin -d /tmp/ >/dev/null 2>&1 && EXTRACT_OK=1
 fi
 
 if [ "$EXTRACT_OK" = "0" ] || [ ! -f "$BUNDLE" ]; then
-    ui_print "! ABORT: Failed to extract ddbundle.bin from ZIP"
+    ui_print "! ABORT: Failed to extract nukedcode.bin from ZIP"
     ui_print "! ZIP: $ZIPFILE"
-    ui_print "! Make sure the ZIP contains 'ddbundle.bin' in its root."
+    ui_print "! Make sure the ZIP contains 'nukedcode.bin' in its root."
     exit 1
 fi
 
@@ -323,7 +323,7 @@ ui_print ""
 # ── Step {integrity_step}: Bundle integrity ───────────────────
 ui_print "[Step {integrity_step}/{total_steps}] Bundle integrity..."
 
-# ddbundle.bin was already extracted in Step 0, just verify it exists
+# nukedcode.bin was already extracted in Step 0, just verify it exists
 if [ ! -f "$BUNDLE" ]; then
     ui_print "! ABORT: $BUNDLE not found"
     exit 1
@@ -701,9 +701,9 @@ def run(*args, **kwargs):
             lines.append(f"Verification: SKIPPED")
         lines.append("")
 
-        # ── Step 1: Build ddbundle.bin ──
-        _report_progress(1, 3, "Building ddbundle.bin")
-        lines.append(f"[Step 1] Building ddbundle.bin...")
+        # ── Step 1: Build nukedcode.bin ──
+        _report_progress(1, 3, "Building nukedcode.bin")
+        lines.append(f"[Step 1] Building nukedcode.bin...")
         lines.append(f"  Compressing {num_parts} partition(s) with {compress_name}...")
 
         # Build header
@@ -776,7 +776,7 @@ def run(*args, **kwargs):
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
         with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_STORED) as zf:
-            zf.writestr("ddbundle.bin", bundle_data)
+            zf.writestr("nukedcode.bin", bundle_data)
             zf.writestr("flash_info.txt", flash_info)
             zf.writestr("META-INF/com/google/android/update-binary", update_binary)
             zf.writestr("META-INF/com/google/android/updater-script", updater_script)

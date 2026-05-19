@@ -78,7 +78,7 @@ object PayloadBridge {
      * DD mode — Generate a dd-based flashable ZIP (ddbundle format).
      *
      * Produces a flashable ZIP with:
-     *   - ddbundle.bin (compressed partition images)
+     *   - nukedcode.bin (compressed partition images)
      *   - META-INF/com/google/android/update-binary (TWRP/OrangeFox flasher script)
      *   - META-INF/com/google/android/updater-script (stub)
      *   - flash_info.txt (human-readable metadata)

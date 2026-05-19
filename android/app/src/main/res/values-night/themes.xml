@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Dark theme override.
+        When night mode is active, Android picks this definition of
+        Theme.PayloadToolkit which inherits from Theme.PayloadToolkit.Dark
+        (defined in values/themes.xml with all dark color mappings).
+    -->
+    <style name="Theme.PayloadToolkit" parent="Theme.PayloadToolkit.Dark" />
+</resources>

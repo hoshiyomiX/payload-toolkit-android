@@ -2,10 +2,9 @@
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
-    android:viewportHeight="24"
-    android:tint="?attr/colorOnSurface">
+    android:viewportHeight="24">
     <!-- Moon / dark mode icon -->
     <path
-        android:fillColor="@android:color/white"
+        android:fillColor="#FFFFFF"
         android:pathData="M12,3c-4.97,0 -9,4.03 -9,9s4.03,9 9,9c0.83,0 1.5,-0.67 1.5,-1.5 0,-0.39 -0.15,-0.74 -0.39,-1.01 -0.23,-0.26 -0.38,-0.61 -0.38,-1.01 0,-0.83 0.67,-1.5 1.5,-1.5L16,16c2.76,0 5,-2.24 5,-5 0,-4.42 -4.03,-8 -9,-8zM6.5,11c-0.83,0 -1.5,-0.67 -1.5,-1.5S5.67,8 6.5,8 8,8.67 8,9.5 7.33,11 6.5,11zM9.5,7c-0.83,0 -1.5,-0.67 -1.5,-1.5S8.67,4 9.5,4s1.5,0.67 1.5,1.5S10.33,7 9.5,7zM14.5,7c-0.83,0 -1.5,-0.67 -1.5,-1.5S13.67,4 14.5,4s1.5,0.67 1.5,1.5S15.33,7 14.5,7zM17.5,11c-0.83,0 -1.5,-0.67 -1.5,-1.5S16.67,8 17.5,8s1.5,0.67 1.5,1.5 -0.67,1.5 -1.5,1.5z" />
 </vector>

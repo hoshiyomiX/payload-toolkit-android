@@ -198,11 +198,10 @@ class MainActivity : AppCompatActivity() {
     // ═══════════════════════════════════════════════════════════════
 
     private fun applyTheme() {
-        val themeMode = prefs.getString("pref_theme_mode", "system") ?: "system"
+        val themeMode = prefs.getString("pref_theme_mode", "light") ?: "light"
         when (themeMode) {
-            "light" -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
             "dark" -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
-            else -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
+            else -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
         }
     }
 
@@ -227,14 +226,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Cycle theme: System -> Light -> Dark -> System */
+    /** Toggle theme: Light <-> Dark */
     private fun cycleTheme() {
-        val current = prefs.getString("pref_theme_mode", "system") ?: "system"
-        val next = when (current) {
-            "system" -> "light"
-            "light" -> "dark"
-            else -> "system"
-        }
+        val current = prefs.getString("pref_theme_mode", "light") ?: "light"
+        val next = if (current == "light") "dark" else "light"
         prefs.edit { putString("pref_theme_mode", next) }
         applyTheme()
         // Update toolbar icon after recreation
@@ -244,11 +239,10 @@ class MainActivity : AppCompatActivity() {
     /** Update the theme toggle menu icon to reflect current mode. */
     private fun updateThemeIcon(menu: android.view.Menu?) {
         val item = menu?.findItem(R.id.action_toggle_theme) ?: return
-        val mode = prefs.getString("pref_theme_mode", "system") ?: "system"
+        val mode = prefs.getString("pref_theme_mode", "light") ?: "light"
         item.setIcon(when (mode) {
-            "light" -> R.drawable.ic_theme_light
             "dark" -> R.drawable.ic_theme_dark
-            else -> R.drawable.ic_theme_auto
+            else -> R.drawable.ic_theme_light
         })
     }
 
