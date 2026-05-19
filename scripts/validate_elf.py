@@ -196,8 +196,12 @@ def fix_soname(path, desired_soname):
         if d_tag == DT_NULL:
             break
         if d_tag == DT_SONAME:
-            str_off = struct.unpack_from('<Q', data, pos + 8)[0]
-            # Read current SONAME string
+            str_idx = struct.unpack_from('<Q', data, pos + 8)[0]
+            # d_val is offset INTO .dynstr (strtab-relative).
+            # Actual file offset = strtab_off + str_idx.
+            if str_idx >= strsz:
+                return False
+            str_off = strtab_off + str_idx
             end = data.index(0, str_off)
             current = data[str_off:end].decode('ascii', errors='replace')
             if current == desired_soname:
@@ -255,14 +259,18 @@ def get_dt_needed_list(data):
         if d_tag == DT_NULL:
             break
         if d_tag == DT_NEEDED:
-            # d_val is offset into .dynstr for the needed lib name
-            str_start = int(d_val)
-            if str_start < strtab_off or str_start >= strtab_off + strsz:
+            # d_val is offset INTO .dynstr (strtab-relative, not a vaddr).
+            # The actual file offset = strtab_off + d_val.
+            # NOTE: This assumes DT_STRTAB vaddr == file offset, which is
+            # true for Termux aarch64 libs (first PT_LOAD: p_vaddr=0).
+            str_idx = int(d_val)
+            if str_idx >= strsz:
                 pos += 16
                 continue
+            str_file_off = strtab_off + str_idx
             try:
-                str_end = data.index(0, str_start, strtab_off + strsz)
-                name = data[str_start:str_end].decode('ascii', errors='replace')
+                str_end = data.index(0, str_file_off, strtab_off + strsz)
+                name = data[str_file_off:str_end].decode('ascii', errors='replace')
                 needed.append(name)
             except (ValueError, IndexError):
                 pass
