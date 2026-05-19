@@ -765,7 +765,8 @@ object PythonBridge {
             if (preloadLibs.isNotEmpty()) {
                 val preloadString = preloadLibs.joinToString(":", transform = { it.absolutePath })
                 env["LD_PRELOAD"] = preloadString
-                diag("[LD_PRELOAD] ${preloadLibs.size} direct deps (${preloadLibs.sumOf { it.length() } bytes)")
+                val preloadBytes = preloadLibs.sumOf { it.length() }
+                diag("[LD_PRELOAD] ${preloadLibs.size} direct deps ($preloadBytes bytes)")
             } else {
                 diag("[LD_PRELOAD] no direct deps to preload")
             }

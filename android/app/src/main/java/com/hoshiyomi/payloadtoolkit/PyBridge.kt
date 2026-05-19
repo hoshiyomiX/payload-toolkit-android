@@ -106,7 +106,7 @@ class PyBridge {
         val outputBuilder = StringBuilder()
         val readerThread = Thread({
             try {
-                val reader = InputStreamReader(FileInputStream(lastReadFd), "UTF-8")
+                val reader = InputStreamReader(FileInputStream("/proc/self/fd/$lastReadFd"), "UTF-8")
                 val buffer = CharArray(8192)
                 var charsRead: Int
                 while (reader.read(buffer).also { charsRead = it } != -1) {

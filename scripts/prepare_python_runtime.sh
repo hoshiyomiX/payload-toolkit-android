@@ -521,7 +521,7 @@ echo "==> Compiling JNI bridge (libpybridge.so)..."
 
 ZIG_VERSION="0.13.0"
 ZIG_CACHE="$PROJECT_ROOT/.zig-cache"
-ZIG_BIN="$ZIG_CACHE/zig-$ZIG_VERSION/zig"
+ZIG_BIN="$ZIG_CACHE/zig-linux-x86_64-$ZIG_VERSION/zig"
 
 if [ ! -x "$ZIG_BIN" ]; then
     echo "    Downloading zig $ZIG_VERSION (cross-compiler for Android)..."
