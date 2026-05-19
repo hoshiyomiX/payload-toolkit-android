@@ -97,31 +97,23 @@ def validate_elf(path):
 # ELF dynamic section constants
 DT_NULL = 0
 DT_NEEDED = 1
+DT_STRTAB = 5
+DT_STRSZ = 10
 DT_SONAME = 14
 
 
-def strip_soname(path):
-    """Strip DT_SONAME from an ELF64 shared library by zeroing the
-    d_un.d_val field of the DT_SONAME entry in the .dynamic section.
-
-    Returns True if SONAME was stripped, False if not found or on error."""
-    try:
-        with open(path, 'r+b') as f:
-            data = bytearray(f.read())
-    except Exception:
-        return False
-
+def _find_dynamic_and_strtab(data):
+    """Find PT_DYNAMIC, DT_STRTAB, DT_STRSZ in an ELF64 binary.
+    Returns (dynamic_off, dynamic_size, strtab_off, strsz) or None."""
     size = len(data)
     if size < 64 or data[:4] != ELF_MAGIC or data[4] != 2 or data[5] != 1:
-        return False
+        return None
 
     e_phoff = struct.unpack_from('<Q', data, 32)[0]
     e_phentsize = struct.unpack_from('<H', data, 54)[0]
     e_phnum = struct.unpack_from('<H', data, 56)[0]
 
-    # Find PT_DYNAMIC segment
-    dynamic_off = 0
-    dynamic_size = 0
+    dynamic_off = dynamic_size = 0
     for i in range(e_phnum):
         entry_off = e_phoff + i * e_phentsize
         if entry_off + 24 > size:
@@ -133,27 +125,140 @@ def strip_soname(path):
             break
 
     if dynamic_off == 0 or dynamic_size < 16:
-        return False
+        return None
 
-    # Scan .dynamic entries for DT_SONAME
-    # ELF64 Dyn: d_tag (8 bytes) + d_un (8 bytes) = 16 bytes each
-    modified = False
+    # Scan .dynamic for DT_STRTAB and DT_STRSZ
+    strtab_off = strsz = 0
     pos = dynamic_off
     while pos + 16 <= min(dynamic_off + dynamic_size, size):
+        d_tag = struct.unpack_from('<Q', data, pos)[0]
+        d_val = struct.unpack_from('<Q', data, pos + 8)[0]
+        if d_tag == DT_NULL:
+            break
+        if d_tag == DT_STRTAB:
+            strtab_off = d_val
+        elif d_tag == DT_STRSZ:
+            strsz = d_val
+        pos += 16
+
+    if strtab_off == 0 or strsz == 0:
+        return None
+
+    return dynamic_off, dynamic_size, strtab_off, strsz
+
+
+def _str_replace_in_place(data, strtab_off, strsz, old_str, new_str):
+    """Replace a string in the .dynstr table in-place.
+    new_str must be <= len(old_str). Returns True if replaced."""
+    if len(new_str) > len(old_str):
+        return False
+    # Search for old_str in .dynstr region
+    search_area = data[strtab_off:strtab_off + strsz]
+    # Split into null-terminated strings and find the match
+    idx = search_area.find(old_str.encode())
+    while idx >= 0:
+        # Verify it's a complete null-terminated string
+        end = idx + len(old_str)
+        if end <= len(search_area) and (end == len(search_area) or search_area[end] == 0):
+            # Check it starts at a string boundary (preceding byte is 0 or idx==0)
+            if idx == 0 or search_area[idx - 1] == 0:
+                # Replace in-place: new_str + null padding
+                abs_idx = strtab_off + idx
+                new_bytes = new_str.encode() + b'\x00' * (len(old_str) - len(new_str))
+                for j, b in enumerate(new_bytes):
+                    data[abs_idx + j] = b
+                return True
+        idx = search_area.find(old_str.encode(), idx + 1)
+    return False
+
+
+def fix_soname(path, desired_soname):
+    """Set DT_SONAME to desired_soname (typically the filename).
+
+    Replaces the SONAME string in .dynstr in-place.
+    Returns True if SONAME was set, False if not found or on error.
+    """
+    try:
+        with open(path, 'r+b') as f:
+            data = bytearray(f.read())
+    except Exception:
+        return False
+
+    result = _find_dynamic_and_strtab(data)
+    if result is None:
+        return False
+    dynamic_off, dynamic_size, strtab_off, strsz = result
+
+    # Find DT_SONAME entry to get current SONAME string
+    pos = dynamic_off
+    while pos + 16 <= min(dynamic_off + dynamic_size, len(data)):
         d_tag = struct.unpack_from('<Q', data, pos)[0]
         if d_tag == DT_NULL:
             break
         if d_tag == DT_SONAME:
-            # Zero out the d_val (bytes pos+8 to pos+15)
-            for j in range(8):
-                data[pos + 8 + j] = 0
-            modified = True
+            str_off = struct.unpack_from('<Q', data, pos + 8)[0]
+            # Read current SONAME string
+            end = data.index(0, str_off)
+            current = data[str_off:end].decode('ascii', errors='replace')
+            if current == desired_soname:
+                return False  # Already correct
+            # Replace in .dynstr
+            if _str_replace_in_place(data, strtab_off, strsz, current, desired_soname):
+                with open(path, 'wb') as f:
+                    f.write(data)
+                return True
+            return False
         pos += 16
+    return False
 
-    if modified:
+
+def fix_needed(path, old_name, new_name):
+    """Replace a DT_NEEDED string in .dynstr (versioned -> unversioned).
+    Returns True if replaced, False if not found or on error.
+    """
+    try:
+        with open(path, 'r+b') as f:
+            data = bytearray(f.read())
+    except Exception:
+        return False
+
+    result = _find_dynamic_and_strtab(data)
+    if result is None:
+        return False
+    dynamic_off, dynamic_size, strtab_off, strsz = result
+
+    if _str_replace_in_place(data, strtab_off, strsz, old_name, new_name):
         with open(path, 'wb') as f:
             f.write(data)
-    return modified
+        return True
+    return False
+
+
+def fix_needed_all(path, jni_dir):
+    """Patch ALL versioned DT_NEEDED entries to unversioned.
+    Uses patchelf --print-needed to discover entries, then binary-patches
+    .dynstr for files too small for patchelf (< 8KB).
+
+    Returns count of patched entries.
+    """
+    import subprocess
+    try:
+        result = subprocess.run(
+            ['patchelf', '--print-needed', path],
+            capture_output=True, text=True, timeout=10)
+        needed_list = [n for n in result.stdout.strip().split('\n') if n and n.endswith('.so')]
+    except Exception:
+        return 0
+
+    patched = 0
+    for needed in needed_list:
+        if '.so.' not in needed:
+            continue
+        unversioned = needed.split('.so.')[0] + '.so'
+        if os.path.isfile(os.path.join(jni_dir, unversioned)):
+            if fix_needed(path, needed, unversioned):
+                patched += 1
+    return patched
 
 
 def main():

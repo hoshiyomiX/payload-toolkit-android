@@ -205,6 +205,15 @@ Java_com_hoshiyomi_payloadtoolkit_PyBridge_nativeRunPython(
     setenv("PYTHONIOENCODING", "utf-8", 1);
 
     /*
+     * Tell Python to search nativeLibraryDir for extension modules.
+     * Extension modules (e.g. zlib.cpython-313-*.so) live in jniLibs
+     * which is extracted to nativeLibraryDir at install time.
+     * PYTHONHOME only covers the stdlib tree; we need PYTHONPATH
+     * for the extension .so files.
+     */
+    setenv("PYTHONPATH", lib_dir, 1);
+
+    /*
      * Pre-load ALL .so files from nativeLibraryDir into the process.
      * This ensures dependency libraries (libz.so, libcrypto.so, etc.)
      * are already loaded when Python's extension modules request them,

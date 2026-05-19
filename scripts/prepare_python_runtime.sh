@@ -264,19 +264,27 @@ for so_file in "$JNI_DIR"/*.so; do
     fi
     file_patched=0
 
-    # Strip DT_SONAME so linker uses filename for dedup.
-    # patchelf --remove-soname sometimes silently fails on Termux .so files.
-    # Fallback: Python binary patcher that zeroes DT_SONAME directly.
+    # Set DT_SONAME to filename so linker matches DT_NEEDED lookups.
+    # Example: libz.so has DT_SONAME "libz.so.1.3.2" → change to "libz.so"
+    # so when extension modules have DT_NEEDED "libz.so", the linker
+    # finds it by SONAME match.
+    #
+    # patchelf --set-soname is preferred; Python fallback renames the
+    # SONAME string in .dynstr in-place (no section growth, no corruption).
+    FILENAME=$(basename "$so_file")
+    SONAME_CURRENT=$(patchelf --print-soname "$so_file" 2>/dev/null || true)
     SONAME_OK=0
-    if patchelf --remove-soname "$so_file" 2>/dev/null && \
-       [ -z "$(patchelf --print-soname "$so_file" 2>/dev/null)" ]; then
+    if [ "$SONAME_CURRENT" = "$FILENAME" ]; then
+        SONAME_OK=1
+    elif patchelf --set-soname "$FILENAME" "$so_file" 2>/dev/null && \
+         [ "$(patchelf --print-soname "$so_file" 2>/dev/null)" = "$FILENAME" ]; then
         SONAME_OK=1
     fi
     if [ "$SONAME_OK" -eq 0 ]; then
         if python3 -c "
 import sys; sys.path.insert(0, '$SCRIPT_DIR')
-from validate_elf import strip_soname
-sys.exit(0 if strip_soname('$so_file') else 1)" 2>/dev/null; then
+from validate_elf import fix_soname
+sys.exit(0 if fix_soname('$so_file', '$FILENAME') else 1)" 2>/dev/null; then
             SONAME_OK=1
         fi
     fi
@@ -304,9 +312,41 @@ sys.exit(0 if strip_soname('$so_file') else 1)" 2>/dev/null; then
     done < <(patchelf --print-needed "$so_file" 2>/dev/null)
     [ "$file_patched" -eq 1 ] && NEEDED_FILES=$((NEEDED_FILES + 1))
 done
-echo "    Stripped $SONAME_REMOVED DT_SONAME entries"
+echo "    Renamed $SONAME_REMOVED DT_SONAME -> filename"
 echo "    Patched $NEEDED_PATCHED DT_NEEDED -> unversioned in $NEEDED_FILES files"
 echo "    Skipped $PATCHELF_SKIPPED files (< ${PATCHELF_MIN_SIZE} bytes, patchelf unsafe)"
+
+# Step 3b: Python-based patching for files skipped by patchelf (< 8KB).
+# These small files (typically C extension modules) still have versioned
+# DT_NEEDED entries that patchelf couldn't touch.  Use in-place .dynstr
+# string replacement — safe because it doesn't grow any ELF sections.
+if [ "$PATCHELF_SKIPPED" -gt 0 ]; then
+    echo "    Patching $PATCHELF_SKIPPED small files with Python binary patcher..."
+    PYTHON_SONAME=0
+    PYTHON_NEEDED=0
+    for so_file in "$JNI_DIR"/*.so; do
+        [ -f "$so_file" ] || continue
+        file_size=$(stat -c%s "$so_file" 2>/dev/null || echo 0)
+        [ "$file_size" -ge "$PATCHELF_MIN_SIZE" ] && continue
+        FILENAME=$(basename "$so_file")
+        # Fix SONAME
+        if python3 -c "
+import sys; sys.path.insert(0, '$SCRIPT_DIR')
+from validate_elf import fix_soname
+sys.exit(0 if fix_soname('$so_file', '$FILENAME') else 1)" 2>/dev/null; then
+            PYTHON_SONAME=$((PYTHON_SONAME + 1))
+        fi
+        # Fix DT_NEEDED (versioned -> unversioned)
+        PATCHED=$(python3 -c "
+import sys; sys.path.insert(0, '$SCRIPT_DIR')
+from validate_elf import fix_needed_all
+print(fix_needed_all('$so_file', '$JNI_DIR'))" 2>/dev/null || echo 0)
+        if [ "$PATCHED" -gt 0 ]; then
+            PYTHON_NEEDED=$((PYTHON_NEEDED + PATCHED))
+        fi
+    done
+    echo "    Python patcher: renamed $PYTHON_SONAME SONAMEs, patched $PYTHON_NEEDED DT_NEEDEDs"
+fi
 
 # Step 4b: Post-patchelf ELF integrity validation ------------------------
 # patchelf modifies ELF sections (DYNAMIC, dynstr).  On .so files with
@@ -444,12 +484,12 @@ else
     exit 1
 fi
 
-# Verify DT_SONAME stripped (spot check)
+# Verify DT_SONAME matches filename (spot check)
 SONAME_CHECK=$(patchelf --print-soname "$JNI_DIR/libz.so" 2>/dev/null || true)
-if [ -n "$SONAME_CHECK" ]; then
-    echo "    WARNING: libz.so still has DT_SONAME: $SONAME_CHECK (should be empty)"
+if [ "$SONAME_CHECK" != "libz.so" ]; then
+    echo "    WARNING: libz.so has DT_SONAME: $SONAME_CHECK (should be libz.so)"
 else
-    echo "    [OK] libz.so: DT_SONAME stripped"
+    echo "    [OK] libz.so: DT_SONAME = libz.so"
 fi
 
 JNI_COUNT=$(find "$JNI_DIR" -maxdepth 1 -name "*.so" | wc -l)
