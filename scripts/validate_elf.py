@@ -246,7 +246,7 @@ def fix_needed_all(path, jni_dir):
         result = subprocess.run(
             ['patchelf', '--print-needed', path],
             capture_output=True, text=True, timeout=10)
-        needed_list = [n for n in result.stdout.strip().split('\n') if n and n.endswith('.so')]
+        needed_list = [n for n in result.stdout.strip().split('\n') if n and '.so' in n]
     except Exception:
         return 0
 
