@@ -264,8 +264,23 @@ for so_file in "$JNI_DIR"/*.so; do
     fi
     file_patched=0
 
-    # Strip DT_SONAME so linker uses filename for dedup
-    if patchelf --remove-soname "$so_file" 2>/dev/null; then
+    # Strip DT_SONAME so linker uses filename for dedup.
+    # patchelf --remove-soname sometimes silently fails on Termux .so files.
+    # Fallback: Python binary patcher that zeroes DT_SONAME directly.
+    SONAME_OK=0
+    if patchelf --remove-soname "$so_file" 2>/dev/null && \
+       [ -z "$(patchelf --print-soname "$so_file" 2>/dev/null)" ]; then
+        SONAME_OK=1
+    fi
+    if [ "$SONAME_OK" -eq 0 ]; then
+        if python3 -c "
+import sys; sys.path.insert(0, '$SCRIPT_DIR')
+from validate_elf import strip_soname
+sys.exit(0 if strip_soname('$so_file') else 1)" 2>/dev/null; then
+            SONAME_OK=1
+        fi
+    fi
+    if [ "$SONAME_OK" -eq 1 ]; then
         SONAME_REMOVED=$((SONAME_REMOVED + 1))
     fi
 

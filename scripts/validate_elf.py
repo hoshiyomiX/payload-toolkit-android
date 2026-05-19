@@ -94,6 +94,68 @@ def validate_elf(path):
     return None
 
 
+# ELF dynamic section constants
+DT_NULL = 0
+DT_NEEDED = 1
+DT_SONAME = 14
+
+
+def strip_soname(path):
+    """Strip DT_SONAME from an ELF64 shared library by zeroing the
+    d_un.d_val field of the DT_SONAME entry in the .dynamic section.
+
+    Returns True if SONAME was stripped, False if not found or on error."""
+    try:
+        with open(path, 'r+b') as f:
+            data = bytearray(f.read())
+    except Exception:
+        return False
+
+    size = len(data)
+    if size < 64 or data[:4] != ELF_MAGIC or data[4] != 2 or data[5] != 1:
+        return False
+
+    e_phoff = struct.unpack_from('<Q', data, 32)[0]
+    e_phentsize = struct.unpack_from('<H', data, 54)[0]
+    e_phnum = struct.unpack_from('<H', data, 56)[0]
+
+    # Find PT_DYNAMIC segment
+    dynamic_off = 0
+    dynamic_size = 0
+    for i in range(e_phnum):
+        entry_off = e_phoff + i * e_phentsize
+        if entry_off + 24 > size:
+            break
+        p_type = struct.unpack_from('<I', data, entry_off)[0]
+        if p_type == PT_DYNAMIC:
+            dynamic_off = struct.unpack_from('<Q', data, entry_off + 8)[0]
+            dynamic_size = struct.unpack_from('<Q', data, entry_off + 32)[0]
+            break
+
+    if dynamic_off == 0 or dynamic_size < 16:
+        return False
+
+    # Scan .dynamic entries for DT_SONAME
+    # ELF64 Dyn: d_tag (8 bytes) + d_un (8 bytes) = 16 bytes each
+    modified = False
+    pos = dynamic_off
+    while pos + 16 <= min(dynamic_off + dynamic_size, size):
+        d_tag = struct.unpack_from('<Q', data, pos)[0]
+        if d_tag == DT_NULL:
+            break
+        if d_tag == DT_SONAME:
+            # Zero out the d_val (bytes pos+8 to pos+15)
+            for j in range(8):
+                data[pos + 8 + j] = 0
+            modified = True
+        pos += 16
+
+    if modified:
+        with open(path, 'wb') as f:
+            f.write(data)
+    return modified
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: validate_elf.py <file_or_directory>")

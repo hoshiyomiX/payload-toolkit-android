@@ -138,6 +138,44 @@ static wchar_t *utf8_to_wcs(const char *utf8)
 }
 
 /* ═══════════════════════════════════════════════════════════════
+ *  Pre-load all .so files from nativeLibraryDir
+ *
+ *  Before loading Python, dlopen every .so in nativeLibraryDir
+ *  with RTLD_GLOBAL.  This ensures all dependency libraries are
+ *  loaded into the process before Python's extension modules
+ *  request them.  Prevents "dlopen failed: cannot find libz.so"
+ *  errors when extension modules have DT_NEEDED for deps whose
+ *  DT_SONAME doesn't match the expected name.
+ *
+ *  Uses RTLD_LAZY to avoid resolving transitive deps prematurely
+ *  (they'll be resolved when actually needed).  Errors are
+ *  non-fatal — individual libs failing to load is OK.
+ * ═══════════════════════════════════════════════════════════════ */
+
+#include <dirent.h>
+
+static void preload_native_libs(const char *lib_dir) {
+    DIR *dir = opendir(lib_dir);
+    if (!dir) return;
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        const char *name = entry->d_name;
+        size_t len = strlen(name);
+        /* Must end with ".so" and not be the bridge itself */
+        if (len < 4) continue;
+        if (strcmp(name + len - 3, ".so") != 0) continue;
+        if (strstr(name, "pybridge")) continue;
+
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/%s", lib_dir, name);
+        /* RTLD_LAZY: don't resolve transitive deps now */
+        dlopen(path, RTLD_LAZY | RTLD_GLOBAL);
+    }
+    closedir(dir);
+}
+
+/* ═══════════════════════════════════════════════════════════════
  *  Python execution via dlopen + Py_Main
  *
  *  Load libpython3.13.so from nativeLibraryDir, resolve Py_Main
@@ -165,6 +203,14 @@ Java_com_hoshiyomi_payloadtoolkit_PyBridge_nativeRunPython(
     setenv("PYTHONUNBUFFERED", "1", 1);
     setenv("PYTHONHOME", stdlib_dir, 1);
     setenv("PYTHONIOENCODING", "utf-8", 1);
+
+    /*
+     * Pre-load ALL .so files from nativeLibraryDir into the process.
+     * This ensures dependency libraries (libz.so, libcrypto.so, etc.)
+     * are already loaded when Python's extension modules request them,
+     * bypassing DT_SONAME mismatch and verneed resolution issues.
+     */
+    preload_native_libs(lib_dir);
 
     /* Build absolute path to libpython3.13.so */
     char python_so[1024];
