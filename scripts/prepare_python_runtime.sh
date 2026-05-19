@@ -561,7 +561,7 @@ if [ -f "$BRIDGE_SRC" ]; then
     echo "    Compiling: $BRIDGE_SRC -> $BRIDGE_OUT"
     set +e  # Allow zig to fail gracefully (use exec fallback)
     "$ZIG_BIN" cc \
-        -target aarch64-linux-android \
+        -target aarch64-linux-musl \
         -shared -fPIC \
         -Wl,--no-undefined \
         -I"$JAVA_INCLUDE" \
