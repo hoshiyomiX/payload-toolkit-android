@@ -179,18 +179,15 @@ done
 
 if [ $DEVICE_MATCH -eq 0 ]; then
     ui_print ""
-    ui_print "  WARNING: Device mismatch!"
+    ui_print "  FATAL: Device mismatch!"
     ui_print "  Expected : {device}"
     ui_print "  Current  : $CURRENT_DEVICE"
     ui_print ""
-    ui_print "  Flashing on wrong device may BRICK it."
-    ui_print "  Press Power to continue, Vol- to abort."
+    ui_print "  Flashing on wrong device will BRICK it."
+    ui_print "  Refusing to continue."
     ui_print ""
-    choose -t 30 "Continue?" "Yes" "No"
-    if [ $? -ne 0 ]; then
-        ui_print "! ABORT: User cancelled (device mismatch)"
-        exit 1
-    fi
+    ui_print "! ABORT: Device mismatch (expected {device}, got $CURRENT_DEVICE)"
+    exit 1
 else
     ui_print "  Device: $CURRENT_DEVICE [OK]"
 fi

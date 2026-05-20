@@ -133,7 +133,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun initializePython() {
         lifecycleScope.launch {
-            showLog("Initializing Payload Toolkit...\n")
+            showLog("\u2500".repeat(40) + "\n")
+            showLog("  Payload Toolkit v${BuildConfig.VERSION_NAME}\n")
+            showLog("\u2500".repeat(40) + "\n\n")
+            showLog("Initializing runtime...\n")
             withContext(Dispatchers.IO) {
                 val result = PythonBridge.ensureInitialized(this@MainActivity)
                 withContext(Dispatchers.Main) {
@@ -151,35 +154,35 @@ class MainActivity : AppCompatActivity() {
                             } catch (_: Exception) { "unknown" }
                         }
                         val source = if (result.isBundled) "bundled" else "system"
-                        showLog("Python runtime: $pyVer ($source)\n")
+                        showLog("  \u2713 Python $pyVer ($source)\n")
 
                         lifecycleScope.launch {
                             val ptVer = withContext(Dispatchers.IO) {
                                 PayloadBridge.getPyzVersion()
                             }
-                            if (ptVer != null) showLog("payload_toolkit $ptVer loaded\n")
+                            if (ptVer != null) showLog("  \u2713 payload_toolkit $ptVer\n")
 
                             // Run dependency health check
                             val depReport = withContext(Dispatchers.IO) {
                                 PythonBridge.checkDependencies()
                             }
-                            showLog(depReport + "\n")
+                            showLog(depReport)
+                            showLog("  \u2713 Ready\n")
+                            showLog("\u2500".repeat(40) + "\n\n")
                         }
-
-                        showLog("\u2550".repeat(50) + "\n\n")
                     } else {
-                        showLog("WARNING: ${result.error}\n\n")
-                        // Show detailed diagnostics so the user can report them
+                        showLog("  \u2717 Initialization failed\n")
+                        showLog("  Error: ${result.error}\n\n")
                         if (result.diagnostics.isNotBlank()) {
                             showLog("[Diagnostics]\n")
                             showLog(result.diagnostics)
-                            showLog("\u2550".repeat(50) + "\n\n")
+                            showLog("\u2500".repeat(40) + "\n\n")
                         }
                         showLog("Possible causes:\n")
-                        showLog("  - APK installed from an old build (before v3.0)\n")
-                        showLog("  - App installed but native libs extraction failed\n")
-                        showLog("  - Try: Uninstall -> Re-download latest APK -> Install\n")
-                        showLog("\u2550".repeat(50) + "\n\n")
+                        showLog("  \u2022 APK from old build (before v3.0)\n")
+                        showLog("  \u2022 Native libs extraction failed\n")
+                        showLog("  \u2022 Fix: Uninstall \u2192 Re-download \u2192 Reinstall\n")
+                        showLog("\u2500".repeat(40) + "\n\n")
                     }
                 }
             }
@@ -658,15 +661,19 @@ class MainActivity : AppCompatActivity() {
         showLog("\n")
         showLog("Output: $outputFileName\n")
 
-        // Read device metadata from UI field (empty = use default)
+        // Read device metadata from UI field (REQUIRED)
         val deviceInput = findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.editTextDevice)
             ?.text?.toString()?.trim() ?: ""
 
         // Persist value for next launch
         prefs.edit { putString("device", deviceInput) }
 
-        // Use non-empty user input, otherwise default applies
-        val device = deviceInput.ifEmpty { "generic" }
+        // Validate: device is required
+        if (deviceInput.isEmpty()) {
+            return PayloadResult.error("Device codename is required. Use Auto-detect or enter manually.")
+        }
+
+        val device = deviceInput
 
         showLog("Device: $device")
 
