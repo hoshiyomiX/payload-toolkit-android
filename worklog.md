@@ -114,3 +114,27 @@ Stage Summary:
 - Commit 4f80cad "fix: remove pre-flash backup feature + fix ic_menu_night build error"
 - CI: https://github.com/hoshiyomiX/payload-toolkit-android/actions/runs/26125205949
 - Remaining features after cleanup: compression level, skip verify, multi-device target
+---
+Task ID: 1
+Agent: main
+Task: 5 UI/log improvements for Payload Toolkit Android
+
+Work Log:
+- Invoked Skill(command="stellar-frameworks") — v5.9.0 active
+- Analyzed codebase: 3 files modified (MainActivity.kt, activity_main.xml, strings.xml)
+- Added LogLevel enum with 5 levels: INFO, WARN, ERROR, SUCCESS, PLAIN
+- Refactored showLog() to accept LogLevel parameter with colored SpannableString prefixes
+- Fixed scroll bug: replaced fullScroll(FOCUS_DOWN) with scrollTo() to prevent parent NestedScrollView from auto-scrolling to log panel
+- Added Auto-detect button (R.id.buttonAutoDetect) next to DEVICE label, reads Build.PRODUCT
+- Replaced "Optional" TextView with Auto-detect MaterialButton in device section
+- Renamed hint_output_dir from "App internal storage (default)" to "Path output"
+- Enhanced repack log summary: shows output file name AND full output path
+- Updated all showLog() calls to use appropriate LogLevel (INFO/WARN/ERROR/SUCCESS)
+- Removed duplicate ContextCompat import
+- Fixed variable ordering bug (device referenced before declaration)
+- Committed as b6939a1
+
+Stage Summary:
+- Commit b6939a1: 84 insertions, 35 deletions across 3 files
+- Key colors: log_info=#80CBC4, log_warning=#FF9800, log_error=#F44336, log_success=#4CAF50
+- Auto-detect uses android.os.Build.PRODUCT
