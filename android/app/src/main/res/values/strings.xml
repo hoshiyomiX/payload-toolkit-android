@@ -31,7 +31,6 @@
     <string name="hint_custom_filename">Custom filename (optional)</string>
     <string name="helper_custom_filename">Leave empty for auto-generated name</string>
     <string name="button_browse">Browse</string>
-    <string name="button_auto_detect">Auto-detect</string>
 
     <!-- Actions -->
     <string name="button_repack">REPACK TO OTA ZIP</string>
