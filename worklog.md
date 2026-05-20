@@ -138,3 +138,25 @@ Stage Summary:
 - Commit b6939a1: 84 insertions, 35 deletions across 3 files
 - Key colors: log_info=#80CBC4, log_warning=#FF9800, log_error=#F44336, log_success=#4CAF50
 - Auto-detect uses android.os.Build.PRODUCT
+---
+last_phase: DELIVER
+task: Fix theme icons (proper sun/moon) + dark mode values-night override + rename output hint
+complexity: Simple
+task_type: Coding
+files_modified: MainActivity.kt, toolbar_menu.xml, strings.xml, ic_theme_light.xml (new), ic_theme_dark.xml (new), values-night/themes.xml (new)
+next_step: IDLE - awaiting input
+
+Work Log:
+- Invoked Skill(command="stellar-frameworks") v5.9.0
+- Created ic_theme_light.xml: Material Symbols "light_mode" sun (24dp, viewport 960x960) with android:tint=?attr/colorOnSurfaceVariant
+- Created ic_theme_dark.xml: Material Symbols "dark_mode" crescent moon (24dp, viewport 960x960) with android:tint=?attr/colorOnSurfaceVariant
+- Both icons use fillColor=@android:color/white (tint overrides at runtime) so they're visible in both themes
+- Updated toolbar_menu.xml: android:icon="@drawable/ic_theme_light" + app:tint="?attr/colorOnSurfaceVariant"
+- Removed all android.R.drawable references (ic_menu_day, ic_menu_night, ic_menu_manage)
+- Reduced theme cycle from 3 modes (System→Light→Dark→System) to 2 modes (Light↔Dark)
+- Created values-night/themes.xml: full dark color palette override for Theme.PayloadToolkit
+  - Parent: Theme.Material3.Dark.NoActionBar (was Theme.Material3.DayNight)
+  - All colors mapped to md_theme_dark_* variants
+  - windowLightStatusBar=false, windowLightNavigationBar=false
+- Renamed hint_output_dir: "Path output" → "File output path"
+- Committed as 69cc718 (6 files, 97+, 20-)
