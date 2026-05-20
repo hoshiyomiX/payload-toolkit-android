@@ -1,13 +1,14 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="960"
-    android:viewportHeight="960"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
     android:tint="?attr/colorOnSurfaceVariant">
 
-    <!-- Material Symbols: dark_mode (crescent moon) -->
+    <!-- Material Symbols Rounded: dark_mode (crescent moon) -->
+    <!-- Source: https://api.iconify.design/material-symbols/dark-mode-rounded.svg -->
     <path
         android:fillColor="@android:color/white"
-        android:pathData="M480,120q-150,0 -255,105T120,480q0,150 105,255t255,105q17,0 28.5,-11.5T520,800q0,-14 -7,-25.5T493,752q-8,-6 -12,-15.5T477,718q0,-20 14.5,-34.5T526,669h60q83,0 141.5,-58.5T786,469q0,-132 -91.5,-240.5T480,120zM264,520q-20,0 -34.5,-14.5T215,471q0,-20 14.5,-34.5T264,422t34.5,14.5T313,471q0,20 -14.5,34.5T264,520zM360,360q-20,0 -34.5,-14.5T311,311q0,-20 14.5,-34.5T360,262t34.5,14.5T409,311q0,20 -14.5,34.5T360,360zM480,520q-20,0 -34.5,-14.5T431,471q0,-20 14.5,-34.5T480,422t34.5,14.5T529,471q0,20 -14.5,34.5T480,520zM600,360q-20,0 -34.5,-14.5T551,311q0,-20 14.5,-34.5T600,262t34.5,14.5T649,311q0,20 -14.5,34.5T600,360zM696,520q-20,0 -34.5,-14.5T647,471q0,-20 14.5,-34.5T696,422t34.5,14.5T745,471q0,20 -14.5,34.5T696,520z" />
+        android:pathData="M12,21q-3.775,0 -6.387,-2.613T3,12q0,-3.45 2.25,-5.988T11,3.05q0.325,-0.05 0.575,0.088t0.4,0.362t0.163,0.525t-0.188,0.575q-0.425,0.65 -0.638,1.375T11.1,7.5q0,2.25 1.575,3.825T16.5,12.9q0.775,0 1.538,-0.225t1.362,-0.625q0.275,-0.175 0.563,-0.162t0.512,0.137q0.25,0.125 0.388,0.375t0.087,0.6q-0.35,3.45 -2.937,5.725T12,21" />
 
 </vector>
