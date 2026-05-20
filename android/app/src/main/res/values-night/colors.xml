@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Dark mode overrides for utility colors.
+        Theme color attributes (colorSurface, etc.) are handled via
+        values-night/themes.xml inheriting Theme.PayloadToolkit.Dark.
+    -->
+
+    <!-- Chip backgrounds -->
+    <color name="chip_selected_bg">#00382E</color>
+    <color name="chip_default_bg">#2C2C2C</color>
+
+    <!-- Card borders -->
+    <color name="card_border">#3F4944</color>
+</resources>

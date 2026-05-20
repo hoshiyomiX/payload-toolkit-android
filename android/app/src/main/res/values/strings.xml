@@ -14,14 +14,16 @@
     <string name="button_remove_all">Remove All</string>
 
     <!-- Compression section -->
-    <string name="label_compression">COMPRESSION</string>
-    <string name="description_compression">Algorithm used to compress partition data inside the bundle. gzip offers the best balance of speed and size for TWRP/OrangeFox.</string>
+    <string name="label_compression">COMPRESSION LEVEL</string>
+    <string name="description_compression">Algorithm and compression level for partition data. Higher level = smaller size but slower build.</string>
+    <string name="label_compression_level">Algorithm:</string>
 
     <!-- Device section -->
     <string name="label_device">DEVICE</string>
-    <string name="hint_device_optional">Optional</string>
-    <string name="hint_device_codename">Device codename</string>
-    <string name="helper_device_codename">Target device for safety check (e.g. crosshatch, S666LN-OP)</string>
+    <string name="hint_device_required">Required</string>
+    <string name="hint_device_codename">Device codename(s) *</string>
+    <string name="helper_device_codename">Target device for safety check. Comma-separate for multi-device (e.g. crosshatch,blueline). Required.</string>
+    <string name="button_auto_detect">Auto-detect</string>
 
     <!-- Output section -->
     <string name="label_output">OUTPUT</string>
@@ -37,6 +39,10 @@
     <string name="button_copy_log">Copy</string>
     <string name="button_clear_log">Clear</string>
     <string name="log_copied">Log copied to clipboard</string>
+
+    <!-- Toggle options -->
+    <string name="label_skip_verify">Skip post-flash verification</string>
+    <string name="helper_skip_verify">Disable SHA-256 hash check after flashing for faster writes. Data integrity won\'t be verified.</string>
 
     <!-- Log section -->
     <string name="label_output_log">Output Log</string>

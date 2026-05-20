@@ -80,7 +80,9 @@ def _print_help(version):
     print("  -n, --name <string>   OTA display name")
     print("  -o, --output <path>   Output file path")
     print("  -p, --partitions <p>  Comma-separated partition names")
-    print("  --device <codename>   Device codename (dd mode)")
+    print("  --device <codename>   Device codename (dd mode, comma-sep for multi)")
+    print("  --compress-level <N>  Compression level (dd mode)")
+    print("  --skip-verify         Skip post-flash SHA-256 verification (dd mode)")
     print("  -v, --verbose         Verbose output")
     print("  --version             Show version")
     print("  --check-deps          Check Python dependency availability")
@@ -138,6 +140,10 @@ def main():
             opts["fingerprint"] = args[i + 1]; i += 1
         elif a == "--device" and i + 1 < len(args):
             opts["device"] = args[i + 1]; i += 1
+        elif a == "--compress-level" and i + 1 < len(args):
+            opts["compress_level"] = args[i + 1]; i += 1
+        elif a == "--skip-verify":
+            opts["skip_verify"] = True
         elif a == "--image" and i + 1 < len(args):
             opts.setdefault("images", []).append(args[i + 1]); i += 1
         elif a == "--partition" and i + 1 < len(args):
@@ -219,6 +225,10 @@ def main():
         device_val = opts.get("device") or opts.get("name")
         if device_val:
             params["device"] = device_val
+        if "compress_level" in opts:
+            params["compress_level"] = int(opts["compress_level"])
+        if opts.get("skip_verify"):
+            params["skip_verify"] = True
 
     elif mode == "sign":
         if "input" not in opts:
