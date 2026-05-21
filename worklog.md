@@ -160,3 +160,13 @@ Work Log:
   - windowLightStatusBar=false, windowLightNavigationBar=false
 - Renamed hint_output_dir: "Path output" → "File output path"
 - Committed as 69cc718 (6 files, 97+, 20-)
+---
+last_phase: DELIVER
+task: SSV + APK structure audit + fix --level crash + release workflow + output preview
+complexity: Standard
+task_type: Coding
+files_modified: PayloadBridge.kt, MainActivity.kt, release.yml, strings.xml
+traceability: IMPL-001 to IMPL-005
+pivot: NONE
+scope_drift: NONE
+next_step: Push commit to origin, verify CI build passes
