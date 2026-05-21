@@ -33,7 +33,7 @@ import time
 import zipfile
 
 from .. import _report_progress
-from ..compression import compress
+from ..compression import compress, DEFAULT_LEVELS
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -584,12 +584,13 @@ def run(*args, **kwargs):
 
     Parameters (via dict or kwargs)
     -------------------------------
-    images       : dict  — {partition_name: image_file_path, ...}
-    compress     : str   — Compression algorithm (default "gzip")
-    output_path  : str   — Path for output .zip file
-    device       : str   — Device codename (optional, comma-separated for multi)
-    level        : int   — Compression level (0=default/best, 1-9 for gzip/bzip2/xz)
-    skip_verify  : str   — "true"/"false" — skip post-flash hash verification
+    images          : dict  — {partition_name: image_file_path, ...}
+    compress        : str   — Compression algorithm (default "gzip")
+    compress_level  : int   — Compression level (None=default per algorithm: gzip=6, bzip2=9, xz=6)
+    output_path     : str   — Path for output .zip file
+    device          : str   — Device codename(s), comma-separated (optional)
+    skip_verify     : bool  — Skip post-flash SHA-256 verification (default False)
+    backup          : bool  — Dump current partitions before flashing (default False)
 
     Returns
     -------

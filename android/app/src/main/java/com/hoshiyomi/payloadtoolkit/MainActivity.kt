@@ -117,7 +117,8 @@ class MainActivity : AppCompatActivity() {
         setupOutputField()
         setupCustomFilenameField()
         setupThemeToggle()
-        updateOutputPreview()  // Show default filename preview on launch
+        setupToggles()
+        updateOutputPreview()  // Show default filename preview immediately
 
         requestStoragePermissions()
         handleIncomingIntent(intent)
