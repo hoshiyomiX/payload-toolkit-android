@@ -29,6 +29,9 @@ import java.io.FileOutputStream
 import androidx.core.content.edit
 import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import com.hoshiyomi.payloadtoolkit.service.PayloadService
 
 /**
  * MainActivity — Payload Toolkit Android.
@@ -54,6 +57,20 @@ class MainActivity : AppCompatActivity() {
     private var selectedCompressionLevel: Int = 0  // 0 = default (best)
     private var imageFiles: MutableList<Pair<String, String>> = mutableListOf() // (name, path)
     private var isExecuting = false
+
+    // Broadcast receiver for PayloadService result
+    private val repackResultReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == PayloadService.ACTION_REPACK_RESULT) {
+                handleRepackResult(
+                    success = intent.getBooleanExtra(PayloadService.EXTRA_SUCCESS, false),
+                    output = intent.getStringExtra(PayloadService.EXTRA_OUTPUT) ?: "",
+                    error = intent.getStringExtra(PayloadService.EXTRA_ERROR),
+                    durationMs = intent.getLongExtra(PayloadService.EXTRA_DURATION_MS, 0)
+                )
+            }
+        }
+    }
 
     // App-internal directories
     private lateinit var inputDir: File
@@ -121,6 +138,18 @@ class MainActivity : AppCompatActivity() {
 
         requestStoragePermissions()
         handleIncomingIntent(intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Register for PayloadService result broadcasts
+        val filter = IntentFilter(PayloadService.ACTION_REPACK_RESULT)
+        registerReceiver(repackResultReceiver, filter)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        try { unregisterReceiver(repackResultReceiver) } catch (_: Exception) {}
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -576,6 +605,23 @@ class MainActivity : AppCompatActivity() {
     //  Execution — Repack to OTA ZIP
     // ═══════════════════════════════════════════════════════════════
 
+    override fun onBackPressed() {
+        if (isExecuting) {
+            // Prevent closing app during repack — show confirmation dialog
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Repack in progress")
+                .setMessage("The repack operation is still running. Are you sure you want to close the app? The process will continue in the background.")
+                .setPositiveButton("Close") { _, _ ->
+                    isExecuting = false
+                    super.onBackPressed()
+                }
+                .setNegativeButton("Stay", null)
+                .show()
+        } else {
+            super.onBackPressed()
+        }
+    }
+
     private fun onRepackClicked() {
         if (isExecuting) {
             showLog("Operation already in progress. Please wait.\n", LogLevel.WARN)
@@ -588,44 +634,16 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        lifecycleScope.launch {
-            isExecuting = true
-            setUIExecuting(true)
-
-            showLog("\n${"\u2550".repeat(50)}\n")
-            showLog("Generating flashable OTA ZIP\n", LogLevel.INFO)
-            showLog("${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())}\n")
-            showLog("\u2500".repeat(50) + "\n\n")
-
-            val result = executeRepack()
-
-            showLog("\n" + "\u2550".repeat(50) + "\n")
-            if (result.success) {
-                showLog("Completed in ${result.durationMs}ms\n", LogLevel.SUCCESS)
-                if (result.output.isNotBlank()) showLog(result.output)
-            } else {
-                showLog("Failed in ${result.durationMs}ms\n", LogLevel.ERROR)
-                showLog("Error: ${result.error}\n", LogLevel.ERROR)
-                if (result.output.isNotBlank()) showLog(result.output)
-            }
-            showLog("\u2550".repeat(50) + "\n\n")
-
-            isExecuting = false
-            setUIExecuting(false)
-        }
-    }
-
-    private suspend fun executeRepack(): PayloadResult {
-        if (imageFiles.isEmpty()) {
-            return PayloadResult.error("No partition images added. Use 'Add Images' button.")
-        }
+        // Collect parameters for the service
+        val images = imageFiles.toMap()
+        val device = findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.editTextDevice)
+            ?.text?.toString()?.trim() ?: ""
+        prefs.edit { putString("device", device) }
+        val deviceValue = device.ifEmpty { "generic" }
 
         val outDir = outputDirPath ?: outputDir.absolutePath
         File(outDir).mkdirs()
 
-        val images = imageFiles.toMap()
-
-        // Use custom filename if set, otherwise auto-generate
         val customName = prefs.getString("pref_custom_filename", "")?.trim()
         val outputFileName = if (!customName.isNullOrEmpty()) {
             if (customName.lowercase().endsWith(".zip")) customName else "$customName.zip"
@@ -634,15 +652,11 @@ class MainActivity : AppCompatActivity() {
         }
         val outPath = File(outDir, outputFileName).absolutePath
 
-        // Read device metadata from UI field (empty = use default)
-        val deviceInput = findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.editTextDevice)
-            ?.text?.toString()?.trim() ?: ""
-
-        // Persist value for next launch
-        prefs.edit { putString("device", deviceInput) }
-
-        // Use non-empty user input, otherwise default applies
-        val device = deviceInput.ifEmpty { "generic" }
+        // Log header
+        showLog("\n${"\u2550".repeat(50)}\n")
+        showLog("Generating flashable OTA ZIP\n", LogLevel.INFO)
+        showLog("${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())}\n")
+        showLog("\u2500".repeat(50) + "\n\n")
 
         showLog("Partitions (${images.size}):\n", LogLevel.INFO)
         images.entries.sortedBy { it.key }.forEach { (name, path) ->
@@ -650,20 +664,58 @@ class MainActivity : AppCompatActivity() {
             showLog("  $name (${formatFileSize(file.length())})\n")
         }
         showLog("Compression: $selectedCompression (level $selectedCompressionLevel)\n", LogLevel.INFO)
-        showLog("Device: $device\n", LogLevel.INFO)
+        showLog("Device: $deviceValue\n", LogLevel.INFO)
         showLog("Output file: $outputFileName\n", LogLevel.INFO)
         showLog("Output path: $outPath\n\n", LogLevel.INFO)
+        showLog("[INFO] Foreground service started — app is protected from kill\n", LogLevel.INFO)
 
-        return PayloadBridge.dd(
-            images = images,
-            device = device,
-            compression = selectedCompression,
-            level = selectedCompressionLevel,
-            outputPath = outPath
-        )
+        // Store output path for result handler
+        _lastOutputPath = outPath
+
+        // Start the foreground service
+        isExecuting = true
+        setUIExecuting(true)
+
+        val serviceIntent = Intent(this, PayloadService::class.java).apply {
+            putExtra("images", HashMap(images))
+            putExtra("device", deviceValue)
+            putExtra("compression", selectedCompression)
+            putExtra("level", selectedCompressionLevel)
+            putExtra("output_path", outPath)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
     }
 
-    // ═══════════════════════════════════════════════════════════════
+    private var _lastOutputPath: String = ""
+
+    /**
+     * Handle result broadcast from PayloadService.
+     * Called on the main thread via BroadcastReceiver.
+     */
+    private fun handleRepackResult(success: Boolean, output: String, error: String?, durationMs: Long) {
+        isExecuting = false
+        setUIExecuting(false)
+
+        showLog("\n" + "\u2550".repeat(50) + "\n")
+        if (success) {
+            showLog("Completed in ${durationMs}ms\n", LogLevel.SUCCESS)
+            if (output.isNotBlank()) showLog(output)
+            showLog("Output: ${_lastOutputPath}\n", LogLevel.INFO)
+        } else {
+            showLog("Failed in ${durationMs}ms\n", LogLevel.ERROR)
+            showLog("Error: $error\n", LogLevel.ERROR)
+            if (output.isNotBlank()) showLog(output)
+        }
+        showLog("\u2550".repeat(50) + "\n\n")
+        showLog("[INFO] Foreground service stopped\n", LogLevel.INFO)
+    }
+
+    // ═══════════════════════════════════════════════════
     //  UI Updates
     // ═══════════════════════════════════════════════════════════════
 

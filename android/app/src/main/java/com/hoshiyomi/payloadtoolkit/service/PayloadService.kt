@@ -1,56 +1,132 @@
 package com.hoshiyomi.payloadtoolkit.service
 
+import android.app.NotificationManager
 import android.app.Service
-import android.content.pm.ServiceInfo
-import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import com.hoshiyomi.payloadtoolkit.PayloadBridge
+import com.hoshiyomi.payloadtoolkit.PayloadResult
 import com.hoshiyomi.payloadtoolkit.PayloadToolkitApp
-import kotlinx.coroutines.*
+import com.hoshiyomi.payloadtoolkit.PythonBridge
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
+/**
+ * PayloadService — Foreground service that keeps the repack process alive.
+ *
+ * Android can kill background coroutines (lifecycleScope) under memory pressure,
+ * especially during long compression operations. This service:
+ *   1. Runs as a foreground service with a persistent notification
+ *   2. Holds a WakeLock to prevent CPU sleep during heavy I/O
+ *   3. Executes the repack via PayloadBridge.dd() and updates notification status
+ *   4. Broadcasts results back to MainActivity via LocalBroadcastManager-style intent extras
+ *
+ * The service is started by MainActivity and stops itself when the operation completes.
+ */
 class PayloadService : Service() {
+
     companion object {
-        const val EXTRA_MODE = "mode"
-        const val EXTRA_INPUT_PATH = "input_path"
-        const val EXTRA_OUTPUT_PATH = "output_path"
         const val NOTIFICATION_ID = 1001
 
-        fun createIntent(context: Context, mode: String, inputPath: String, outputPath: String): Intent {
-            return Intent(context, PayloadService::class.java).apply {
-                putExtra(EXTRA_MODE, mode)
-                putExtra(EXTRA_INPUT_PATH, inputPath)
-                putExtra(EXTRA_OUTPUT_PATH, outputPath)
-            }
-        }
+        // Intent action broadcast back to MainActivity
+        const val ACTION_REPACK_RESULT = "com.hoshiyomi.payloadtoolkit.ACTION_REPACK_RESULT"
+        const val EXTRA_SUCCESS = "success"
+        const val EXTRA_OUTPUT = "output"
+        const val EXTRA_ERROR = "error"
+        const val EXTRA_DURATION_MS = "duration_ms"
+
+        // Notification ID constants for updating
+        private const val NOTIFICATION_TITLE = "Payload Toolkit"
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var operationJob: Job? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+    private lateinit var notificationManager: NotificationManager
+
+    override fun onCreate() {
+        super.onCreate()
+        notificationManager = getSystemService(NotificationManager::class.java)
+        acquireWakeLock()
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val mode = intent?.getStringExtra(EXTRA_MODE) ?: return START_NOT_STICKY
-        val inputPath = intent.getStringExtra(EXTRA_INPUT_PATH) ?: return START_NOT_STICKY
-        val outputPath = intent.getStringExtra(EXTRA_OUTPUT_PATH) ?: return START_NOT_STICKY
+        // Start foreground immediately with "preparing" notification
+        startForegroundNotification("Preparing repack operation...")
 
-        startForegroundNotification(mode)
-        executeOperation(mode, inputPath, outputPath)
+        operationJob = serviceScope.launch {
+            executeRepack(intent)
+        }
 
         return START_NOT_STICKY
     }
 
-    private fun startForegroundNotification(mode: String) {
-        val notification = NotificationCompat.Builder(this, PayloadToolkitApp.CHANNEL_ID)
-            .setContentTitle("Payload Toolkit")
-            .setContentText("Running $mode operation...")
-            .setSmallIcon(android.R.drawable.ic_menu_info_details)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setOngoing(true)
-            .build()
+    // ═══════════════════════════════════════════════════════════════
+    //  Core execution
+    // ═══════════════════════════════════════════════════════════════
 
+    private suspend fun executeRepack(intent: Intent?) {
+        val images: Map<String, String> =
+            @Suppress("DEPRECATION")
+            (intent?.getSerializableExtra("images") as? Map<*, *>)?.mapKeys { it.key.toString() }
+                ?.mapValues { it.value.toString() } ?: emptyMap()
+
+        val device = intent?.getStringExtra("device") ?: "generic"
+        val compression = intent?.getStringExtra("compression") ?: "gzip"
+        val level = intent?.getIntExtra("level", 0) ?: 0
+        val outputPath = intent?.getStringExtra("output_path") ?: ""
+
+        if (images.isEmpty() || outputPath.isBlank()) {
+            updateNotification("Repack failed: missing parameters", isError = true)
+            broadcastResult(PayloadResult.error("Missing images or output path"))
+            stopSelf()
+            return
+        }
+
+        val partitionInfo = images.keys.sorted().joinToString(", ")
+        updateNotification("Repacking: $partitionInfo [$compression]...")
+
+        val result = PayloadBridge.dd(
+            images = images,
+            device = device,
+            compression = compression,
+            level = level,
+            outputPath = outputPath
+        )
+
+        // Update notification with final status
+        if (result.success) {
+            updateNotification(
+                "Repack completed in ${formatDuration(result.durationMs)}",
+                isSuccess = true
+            )
+        } else {
+            updateNotification(
+                "Repack failed after ${formatDuration(result.durationMs)}",
+                isError = true
+            )
+        }
+
+        broadcastResult(result)
+        stopSelf()
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Notification management
+    // ═══════════════════════════════════════════════════════════════
+
+    private fun startForegroundNotification(text: String) {
+        val notification = buildNotification(text)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
@@ -58,16 +134,90 @@ class PayloadService : Service() {
         }
     }
 
-    private fun executeOperation(mode: String, inputPath: String, outputPath: String) {
-        operationJob = serviceScope.launch {
-            // Delegated to PayloadBridge in future integration
-            delay(1000)
+    private fun updateNotification(text: String, isSuccess: Boolean = false, isError: Boolean = false) {
+        val notification = buildNotification(text, isSuccess, isError)
+        notificationManager.notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun buildNotification(
+        text: String,
+        isSuccess: Boolean = false,
+        isError: Boolean = false
+    ): android.app.Notification {
+        return NotificationCompat.Builder(this, PayloadToolkitApp.CHANNEL_ID)
+            .setContentTitle(NOTIFICATION_TITLE)
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true) // Non-swipeable while running
+            .setSilent(true) // No sound for status updates
+            .apply {
+                if (isSuccess) {
+                    setAutoCancel(true) // Allow dismiss on success
+                }
+                if (isError) {
+                    setAutoCancel(true) // Allow dismiss on error
+                }
+            }
+            .build()
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Result broadcast
+    // ═══════════════════════════════════════════════════════════════
+
+    private fun broadcastResult(result: PayloadResult) {
+        val broadcast = Intent(ACTION_REPACK_RESULT).apply {
+            putExtra(EXTRA_SUCCESS, result.success)
+            putExtra(EXTRA_OUTPUT, result.output)
+            putExtra(EXTRA_ERROR, result.error)
+            putExtra(EXTRA_DURATION_MS, result.durationMs)
+            setPackage(packageName)
+        }
+        sendBroadcast(broadcast)
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  WakeLock — prevent CPU sleep during heavy I/O
+    // ═══════════════════════════════════════════════════════════════
+
+    private fun acquireWakeLock() {
+        val powerManager = getSystemService(PowerManager::class.java)
+        wakeLock = powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "PayloadToolkit::RepackWakeLock"
+        ).apply {
+            setReferenceCounted(false)
+            acquire(30 * 60 * 1000L) // 30 minute max timeout safety
         }
     }
 
+    private fun releaseWakeLock() {
+        try {
+            wakeLock?.release()
+        } catch (_: Exception) { /* already released */ }
+        wakeLock = null
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Lifecycle
+    // ═══════════════════════════════════════════════════════════════
+
     override fun onDestroy() {
-        super.onDestroy()
         operationJob?.cancel()
         serviceScope.cancel()
+        releaseWakeLock()
+        notificationManager.cancel(NOTIFICATION_ID)
+        super.onDestroy()
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Utilities
+    // ═══════════════════════════════════════════════════════════════
+
+    private fun formatDuration(ms: Long): String {
+        val seconds = ms / 1000
+        return if (seconds < 60) "${seconds}s"
+        else "${seconds / 60}m ${seconds % 60}s"
     }
 }
