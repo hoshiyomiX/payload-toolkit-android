@@ -36,7 +36,20 @@ def set_progress_callback(callback):
 
 
 def _report_progress(current, total, message=""):
-    """Internal helper to invoke the progress callback if set."""
+    """Internal helper to invoke the progress callback if set.
+
+    Also prints a machine-readable progress marker to stdout so the
+    Kotlin exec-mode bridge can parse it in real time (line-by-line).
+    Format:  __PROGRESS__<current>/<total>/<message>
+    """
+    # Stdout marker for Kotlin stdout-line parsing (exec mode)
+    try:
+        msg_clean = str(message).replace("/", "_").replace("\\", "_")
+        print(f"__PROGRESS__{int(current)}/{int(total)}/{msg_clean}", flush=True)
+    except Exception:
+        pass
+
+    # In-process callback (JNI mode or direct Python usage)
     if _progress_callback is not None:
         try:
             _progress_callback(int(current), int(total), str(message))

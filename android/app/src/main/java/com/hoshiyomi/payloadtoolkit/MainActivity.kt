@@ -61,12 +61,16 @@ class MainActivity : AppCompatActivity() {
     // Broadcast receiver for PayloadService result
     private val repackResultReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == PayloadService.ACTION_REPACK_RESULT) {
-                handleRepackResult(
+            when (intent.action) {
+                PayloadService.ACTION_REPACK_RESULT -> handleRepackResult(
                     success = intent.getBooleanExtra(PayloadService.EXTRA_SUCCESS, false),
                     output = intent.getStringExtra(PayloadService.EXTRA_OUTPUT) ?: "",
                     error = intent.getStringExtra(PayloadService.EXTRA_ERROR),
                     durationMs = intent.getLongExtra(PayloadService.EXTRA_DURATION_MS, 0)
+                )
+                PayloadService.ACTION_REPACK_PROGRESS -> handleRepackProgress(
+                    percent = intent.getIntExtra(PayloadService.EXTRA_PROGRESS_PERCENT, 0),
+                    message = intent.getStringExtra(PayloadService.EXTRA_PROGRESS_MESSAGE) ?: ""
                 )
             }
         }
@@ -142,9 +146,16 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        // Register for PayloadService result broadcasts
-        val filter = IntentFilter(PayloadService.ACTION_REPACK_RESULT)
-        registerReceiver(repackResultReceiver, filter)
+        // Register for PayloadService result + progress broadcasts
+        val filter = IntentFilter().apply {
+            addAction(PayloadService.ACTION_REPACK_RESULT)
+            addAction(PayloadService.ACTION_REPACK_PROGRESS)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(repackResultReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(repackResultReceiver, filter)
+        }
     }
 
     override fun onStop() {
@@ -694,6 +705,20 @@ class MainActivity : AppCompatActivity() {
     private var _lastOutputPath: String = ""
 
     /**
+     * Handle progress update broadcast from PayloadService.
+     * Updates the progress bar to determinate mode with percentage.
+     */
+    private fun handleRepackProgress(percent: Int, message: String) {
+        runOnUiThread {
+            val progressBar = findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.progressBar)
+            if (progressBar != null) {
+                progressBar.isIndeterminate = false
+                progressBar.progress = percent
+            }
+        }
+    }
+
+    /**
      * Handle result broadcast from PayloadService.
      * Called on the main thread via BroadcastReceiver.
      */
@@ -773,8 +798,16 @@ class MainActivity : AppCompatActivity() {
     private fun setUIExecuting(executing: Boolean) {
         runOnUiThread {
             findViewById<View>(R.id.buttonExecute)?.isEnabled = !executing
-            findViewById<View>(R.id.progressBar)?.visibility =
-                if (executing) View.VISIBLE else View.GONE
+            val progressBar = findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.progressBar)
+            if (executing) {
+                progressBar?.visibility = View.VISIBLE
+                progressBar?.isIndeterminate = true  // Start indeterminate, will switch to determinate on progress
+                progressBar?.progress = 0
+            } else {
+                progressBar?.visibility = View.GONE
+                progressBar?.isIndeterminate = true
+                progressBar?.progress = 0
+            }
             findViewById<View>(R.id.buttonAddImages)?.isEnabled = !executing
             findViewById<View>(R.id.buttonRemoveAll)?.isEnabled = !executing
         }

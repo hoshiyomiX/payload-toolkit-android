@@ -11,7 +11,7 @@ import androidx.core.app.NotificationCompat
 import com.hoshiyomi.payloadtoolkit.PayloadBridge
 import com.hoshiyomi.payloadtoolkit.PayloadResult
 import com.hoshiyomi.payloadtoolkit.PayloadToolkitApp
-import com.hoshiyomi.payloadtoolkit.PythonBridge
+import com.hoshiyomi.payloadtoolkit.ProgressUpdate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,10 +38,13 @@ class PayloadService : Service() {
 
         // Intent action broadcast back to MainActivity
         const val ACTION_REPACK_RESULT = "com.hoshiyomi.payloadtoolkit.ACTION_REPACK_RESULT"
+        const val ACTION_REPACK_PROGRESS = "com.hoshiyomi.payloadtoolkit.ACTION_REPACK_PROGRESS"
         const val EXTRA_SUCCESS = "success"
         const val EXTRA_OUTPUT = "output"
         const val EXTRA_ERROR = "error"
         const val EXTRA_DURATION_MS = "duration_ms"
+        const val EXTRA_PROGRESS_PERCENT = "progress_percent"
+        const val EXTRA_PROGRESS_MESSAGE = "progress_message"
 
         // Notification ID constants for updating
         private const val NOTIFICATION_TITLE = "Payload Toolkit"
@@ -101,7 +104,14 @@ class PayloadService : Service() {
             device = device,
             compression = compression,
             level = level,
-            outputPath = outputPath
+            outputPath = outputPath,
+            onProgress = { progress ->
+                // Update notification with progress percentage
+                val notifText = "Repacking: $progress.percent% — ${progress.message}"
+                updateNotification(notifText)
+                // Broadcast progress to MainActivity for progress bar
+                broadcastProgress(progress)
+            }
         )
 
         // Update notification with final status
@@ -172,6 +182,15 @@ class PayloadService : Service() {
             putExtra(EXTRA_OUTPUT, result.output)
             putExtra(EXTRA_ERROR, result.error)
             putExtra(EXTRA_DURATION_MS, result.durationMs)
+            setPackage(packageName)
+        }
+        sendBroadcast(broadcast)
+    }
+
+    private fun broadcastProgress(progress: ProgressUpdate) {
+        val broadcast = Intent(ACTION_REPACK_PROGRESS).apply {
+            putExtra(EXTRA_PROGRESS_PERCENT, progress.percent)
+            putExtra(EXTRA_PROGRESS_MESSAGE, progress.message)
             setPackage(packageName)
         }
         sendBroadcast(broadcast)

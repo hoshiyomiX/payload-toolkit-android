@@ -678,21 +678,25 @@ object PythonBridge {
      *
      * JNI mode (preferred): dlopen + Py_Main — no subprocess, no linker issues.
      * Exec mode (fallback): ProcessBuilder + LD_PRELOAD — may show linker warnings.
+     *
+     * @param onProgress Optional callback invoked when a __PROGRESS__ marker is
+     *                   parsed from stdout. Only effective in exec mode (JNI returns
+     *                   output after completion, progress is parsed retroactively).
      */
-    fun executePyz(args: List<String>): ExecResult {
+    fun executePyz(args: List<String>, onProgress: ((ProgressUpdate) -> Unit)? = null): ExecResult {
         val pyz = pyzPath ?: return ExecResult("", ".pyz not found", -1, 0)
 
         // JNI mode: run Python in-process via dlopen
         if (useJniMode && pyBridge != null && nativeLibDir != null && stdlibDir != null) {
-            return executeViaJni(pyz, args)
+            return executeViaJni(pyz, args, onProgress)
         }
 
-        // Exec mode: run Python as subprocess
+        // Exec mode: run Python as subprocess (streaming for progress)
         val py = pythonPath ?: return ExecResult("", "Python not initialized", -1, 0)
-        return executeViaExec(py, pyz, args)
+        return executeViaExec(py, pyz, args, onProgress)
     }
 
-    private fun executeViaJni(pyz: String, args: List<String>): ExecResult {
+    private fun executeViaJni(pyz: String, args: List<String>, onProgress: ((ProgressUpdate) -> Unit)?): ExecResult {
         val startTime = System.currentTimeMillis()
         Log.d(TAG, "Exec (JNI): $pyz ${args.joinToString(" ")}")
         val result = pyBridge!!.runPython(
@@ -706,10 +710,16 @@ object PythonBridge {
         if (!result.success) {
             Log.w(TAG, "JNI exec exit ${result.exitCode}: ${result.output.take(500)}")
         }
+
+        // JNI mode returns all output after completion — parse progress retroactively
+        if (onProgress != null) {
+            parseProgressFromOutput(result.output, onProgress)
+        }
+
         return ExecResult(result.output, result.error, result.exitCode, duration)
     }
 
-    private fun executeViaExec(py: String, pyz: String, args: List<String>): ExecResult {
+    private fun executeViaExec(py: String, pyz: String, args: List<String>, onProgress: ((ProgressUpdate) -> Unit)?): ExecResult {
         val startTime = System.currentTimeMillis()
         return try {
             val command = mutableListOf(py, pyz)
@@ -718,9 +728,20 @@ object PythonBridge {
             configureEnvironment(pb)
             Log.d(TAG, "Exec (exec): ${command.joinToString(" ")}")
             val process = pb.start()
-            val rawOutput = process.inputStream.bufferedReader().readText()
+
+            // Read stdout line-by-line for real-time progress parsing
+            val outputLines = mutableListOf<String>()
+            val reader = process.inputStream.bufferedReader()
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                val raw = line!!
+                if (parseProgressLine(raw, onProgress)) continue
+                outputLines.add(raw)
+            }
+
             val exitCode = process.waitFor()
             val duration = System.currentTimeMillis() - startTime
+            val rawOutput = outputLines.joinToString("\n")
             val output = filterLinkerWarnings(rawOutput)
             if (exitCode != 0) {
                 Log.w(TAG, "Exec exit $exitCode, output: ${output.take(500)}")
@@ -733,8 +754,52 @@ object PythonBridge {
         }
     }
 
-    /** @deprecated Use [executePyz] instead. */
-    fun executePyzWithTermuxEnv(args: List<String>): ExecResult = executePyz(args)
+    // ═══════════════════════════════════════════════════════════════
+    //  Progress parsing
+    // ═══════════════════════════════════════════════════════════════
+
+    private val PROGRESS_MARKER = "__PROGRESS__"
+
+    /**
+     * Parse a single stdout line for __PROGRESS__ marker.
+     * @return true if the line was a progress marker (stripped from output), false otherwise.
+     */
+    private fun parseProgressLine(line: String, onProgress: ((ProgressUpdate) -> Unit)?): Boolean {
+        val idx = line.indexOf(PROGRESS_MARKER)
+        if (idx < 0) return false
+
+        val payload = line.substring(idx + PROGRESS_MARKER.length)
+        val parts = payload.split("/", limit = 3)
+        if (parts.size >= 2) {
+            val current = parts[0].toIntOrNull() ?: return false
+            val total = parts[1].toIntOrNull() ?: return false
+            val message = if (parts.size >= 3) parts[2].replace("_", " ") else ""
+            val percent = if (total > 0) (current * 100 / total) else 0
+            onProgress?.invoke(ProgressUpdate(current, total, message, percent))
+            return true  // Strip this line from output
+        }
+        return false
+    }
+
+    /** Parse all progress markers from completed output (for JNI mode retroactive parsing). */
+    private fun parseProgressFromOutput(output: String, onProgress: (ProgressUpdate) -> Unit) {
+        var lastProgress: ProgressUpdate? = null
+        for (line in output.lineSequence()) {
+            val idx = line.indexOf(PROGRESS_MARKER)
+            if (idx < 0) continue
+            val payload = line.substring(idx + PROGRESS_MARKER.length)
+            val parts = payload.split("/", limit = 3)
+            if (parts.size >= 2) {
+                val current = parts[0].toIntOrNull() ?: continue
+                val total = parts[1].toIntOrNull() ?: continue
+                val message = if (parts.size >= 3) parts[2].replace("_", " ") else ""
+                val percent = if (total > 0) (current * 100 / total) else 0
+                lastProgress = ProgressUpdate(current, total, message, percent)
+            }
+        }
+        // Emit the last known progress as final state
+        lastProgress?.let { onProgress(it) }
+    }
 
     // ═══════════════════════════════════════════════════════════════
     //  Environment configuration (exec mode only)
@@ -821,6 +886,14 @@ object PythonBridge {
         return SYSTEM_PYTHON_PATHS.any { it.contains("termux") && File(it).exists() }
     }
 }
+
+/** Progress data parsed from Python __PROGRESS__ stdout markers. */
+data class ProgressUpdate(
+    val current: Int,
+    val total: Int,
+    val message: String,
+    val percent: Int
+)
 
 data class ExecResult(
     val output: String,

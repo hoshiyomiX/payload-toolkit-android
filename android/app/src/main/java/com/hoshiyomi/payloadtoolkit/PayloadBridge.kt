@@ -58,9 +58,9 @@ object PayloadBridge {
      * PythonBridge.executePyz auto-configures the environment based on
      * whether Python is bundled or system (Termux).
      */
-    private suspend fun executePyz(args: List<String>): PayloadResult {
+    private suspend fun executePyz(args: List<String>, onProgress: ((ProgressUpdate) -> Unit)? = null): PayloadResult {
         return withContext(Dispatchers.IO) {
-            val execResult = PythonBridge.executePyz(args)
+            val execResult = PythonBridge.executePyz(args, onProgress)
 
             if (execResult.success) {
                 PayloadResult.success(execResult.output, execResult.durationMs)
@@ -100,7 +100,8 @@ object PayloadBridge {
         compression: String = "gzip",
         level: Int = 0,
         skipVerify: Boolean = false,
-        outputPath: String
+        outputPath: String,
+        onProgress: ((ProgressUpdate) -> Unit)? = null
     ): PayloadResult {
         if (images.isEmpty()) return PayloadResult.error("No images specified for DD ZIP")
         if (compression !in ALL_COMPRESSION)
@@ -128,7 +129,7 @@ object PayloadBridge {
         // Always pass --device so the Python side receives it
         args.add("--device")
         args.add(device.ifEmpty { "generic" })
-        return executePyz(args)
+        return executePyz(args, onProgress)
     }
 
     /**
