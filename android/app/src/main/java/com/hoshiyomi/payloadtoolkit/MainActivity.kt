@@ -690,7 +690,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateOutputPreview() {
-        val textView = findViewById<android.widget.TextView>(R.id.textViewOutputPreview) ?: return
 
         // Use custom filename if set, otherwise auto-generate
         val customName = prefs.getString("pref_custom_filename", "")?.trim()
@@ -705,7 +704,10 @@ class MainActivity : AppCompatActivity() {
             val ts = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())
             "flashable_dd_v1_${ts}_${selectedCompression}.zip"
         }
-        textView.text = fileName
+
+        // Show preview as helper text below the custom filename input field
+        val layout = findViewById<com.google.android.material.textfield.TextInputLayout>(R.id.layoutCustomFilename)
+        layout?.helperText = fileName
     }
 
     private fun copyPendingRemovals() {
