@@ -32,15 +32,26 @@ data class PayloadResult(
  * This app is DD-mode only: generates ddbundle-format flashable ZIPs
  * from partition images (.img) for TWRP/OrangeFox recovery flashing.
  *
- * Supported compression: none, gzip, bzip2, xz
+ * Supported compression: none, gzip, bzip2, xz, brotli
  */
 object PayloadBridge {
 
     // Compression algorithm choices exposed in the UI spinner
-    val COMPRESSION_ALGORITHMS = listOf("gzip", "none", "bzip2", "xz")
+    val COMPRESSION_ALGORITHMS = listOf("gzip", "none", "bzip2", "xz", "brotli")
 
     // All valid compression values (for validation)
-    val ALL_COMPRESSION = setOf("none", "gzip", "bzip2", "xz")
+    val ALL_COMPRESSION = setOf("none", "gzip", "bzip2", "xz", "brotli")
+
+
+    // Compression level ranges per algorithm: (min, max, default)
+    val COMPRESS_LEVELS = mapOf(
+        "none" to Triple(0, 0, 0),
+        "gzip" to Triple(1, 9, 6),
+        "bzip2" to Triple(1, 9, 9),
+        "xz" to Triple(0, 9, 6),
+        "brotli" to Triple(0, 11, 6)
+    )
+
 
     /**
      * Execute payload_toolkit.pyz with the given CLI arguments.
@@ -76,10 +87,11 @@ object PayloadBridge {
      *   - flash_info.txt (human-readable metadata)
      *
      * @param images Map of partition name -> absolute path to .img file
-     * @param device Device codename (e.g. "crosshatch,S666LN-OP" — comma-separated)
-     * @param compression Compression algorithm: none, gzip, bzip2, or xz
-     * @param level Compression level: 0=default(best), 1-9 for gzip/bzip2/xz
-     * @param skipVerify If true, skip post-flash SHA-256 verification
+     * @param device Device codename(s), comma-separated (e.g. "crosshatch" or "OP11,OP11A")
+     * @param compression Compression algorithm: none, gzip, bzip2, xz, or brotli
+     * @param compressionLevel Compression level (algorithm-specific range, null=default)
+     * @param skipVerify Skip post-flash SHA-256 hash verification
+     * @param backup Dump current partitions before flashing (in recovery)
      * @param outputPath Absolute path to output .zip file
      */
     suspend fun dd(

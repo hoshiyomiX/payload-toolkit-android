@@ -15,7 +15,7 @@
 # Files in nativeLibraryDir (from jniLibs) can be executed.  Pure .py files
 # only need read access, so app data is fine for them.
 #
-# Packages: python 3.13, libandroid-support, liblzma, libbz2, libcrypto,
+# Packages: python 3.13, python-brotli, libandroid-support, liblzma, libbz2, libcrypto,
 #           libsqlite3, ncurses, readline, libffi, zlib, libcrypt
 
 set -euo pipefail
@@ -71,6 +71,7 @@ echo ""
 echo "==> Downloading packages..."
 PACKAGES=(
     python
+    python-brotli
     libandroid-posix-semaphore
     libandroid-support
     libbz2

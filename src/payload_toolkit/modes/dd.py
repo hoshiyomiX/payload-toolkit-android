@@ -21,7 +21,7 @@ ddbundle format:
     META-INF/com/google/android/updater-script — Stub ("#Mtk client script")
 
 Compress IDs (stored in header + used by flasher):
-    0 = none,  1 = gzip,  2 = bzip2,  3 = xz
+    0 = none,  1 = gzip,  2 = bzip2,  3 = xz,  4 = brotli
 """
 
 import hashlib
@@ -48,6 +48,7 @@ COMPRESS_ID_MAP = {
     "gzip": 1,
     "bzip2": 2,
     "xz": 3,
+    "brotli": 4,
 }
 
 # ddbundle numeric ID -> shell decompressor command
@@ -56,6 +57,7 @@ COMPRESS_CMD_MAP = {
     1: "gzip",
     2: "bzip2",
     3: "xz",
+    4: "brotli",
 }
 
 # ddbundle numeric ID -> file extension for temp files
@@ -64,6 +66,7 @@ COMPRESS_EXT_MAP = {
     1: ".gz",
     2: ".bz2",
     3: ".xz",
+    4: ".br",
 }
 
 # Slant ASCII art for "Renuked v3" — TWRP console banner
@@ -310,7 +313,7 @@ check_decompressor() {{
 if ! check_decompressor "{decomp_cmd}"; then
     ui_print "! ABORT: {decomp_cmd} not found."
     ui_print "! Available tools:"
-    which gzip bzip2 xz 2>/dev/null || echo "  (none found)"
+    which gzip bzip2 xz brotli 2>/dev/null || echo "  (none found)"
     busybox --list 2>/dev/null | head -5
     ui_print "! Rebuild bundle with a available compressor."
     ui_print "! Recommended: --compress gzip"
