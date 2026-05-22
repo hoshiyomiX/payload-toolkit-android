@@ -1,5 +1,58 @@
 # Changelog
 
+## [5.11.0] — 2026-05-21
+
+### Fixed
+
+- **CRITICAL: setup.sh stuck at v5.9.0** — setup.sh header, banner, version check, and done banner all referenced v5.9.0 despite SKILL.md being at v5.10.0. The version check at line 75 used a hardcoded `5.9.0` comparison, causing a FALSE FAIL every time setup.sh was run after the v5.10.0 upgrade. Root cause: both previous audits (44673ea, b21a50c) operated file-by-file and never performed a repo-wide version consistency sweep. Fixed by syncing all version references to v5.11.0.
+
+- **CRITICAL: root README.md stuck at v5.9.0** — The repository root README.md (the first thing users see on GitHub) was never updated in any previous audit. Version badge showed 5.9.0, invoke text referenced v5.9.0, and file structure still listed `assets/page.tsx` which was deleted in v5.10.0. This was the primary user-visible complaint. Fixed by updating badge, invoke text, removing dead asset from file tree, and adding v5.10.0/v5.11.0 to version history.
+
+- **setup.sh version check used hardcoded value** — The version comparison `if [ "$INSTALLED_VER" = "5.9.0" ]` broke on every version bump because it required manual updating of a magic string. Replaced with single-source extraction: `EXPECTED_VER` is now read from `SKILL.md` using the same `grep -oP` pattern that boot.sh uses. This eliminates the class of version-desync bugs that caused this release.
+
+- **setup.sh hook out of sync with boot.sh** — setup.sh wrote a v5.9.0-era hook (clone + pull + boot, output to `/dev/null`) while boot.sh wrote a v5.9.0+ hook (clone + pull + boot + health check + log rotation). Running setup.sh after boot.sh would silently downgrade the hook. Synced setup.sh hook to match boot.sh's 3-phase pipeline format.
+
+### Changed
+
+- **boot.sh git status check scoped to relevant files** — Line 131 `git status --porcelain -- skill/ boot.sh README.md` included root `README.md` which boot.sh never reads or writes. Removed to limit dirty-check to files directly managed by boot.sh: `skill/` and `boot.sh`.
+
+- **SKILL.md VERSION SYNC comment expanded** — Now lists all 7 files that must be updated on version bump: (1) SKILL.md metadata + banners, (2) boot.sh header/banner/MINIMUM_VERSION, (3) setup.sh header/banner/version-check, (4) root README.md badge/invoke/file-structure/version-history, (5) skill/README.md version-history, (6) CHANGELOG.md. Previous comment only listed 4 files — the missing references are what caused the desync.
+
+### Why
+
+The root cause was not any individual bug but a **methodological failure**: previous audits operated file-by-file, checking each file in isolation for correctness within itself. This approach cannot catch cross-file consistency issues — the exact class of problem that caused both the setup.sh and root README.md desyncs. A repo-wide consistency sweep (check that all version references across all files agree) would have caught every issue in this release in a single pass. The expanded VERSION SYNC comment and single-source version extraction in setup.sh are structural defenses against future occurrences — they make the correct behavior the path of least resistance rather than requiring perfect manual discipline on every version bump.
+
+### Files Modified
+
+SKILL.md (version + VERSION SYNC comment), boot.sh (version + MINIMUM_VERSION + banner + dirty-check scope), setup.sh (version + banner + single-source version check + hook sync + done banner), README.md root (badge + invoke + file structure + version history), skill/stellar-frameworks/README.md (version history), CHANGELOG.md (v5.11.0 entry).
+
+## [5.10.0] — 2026-05-21
+
+### Fixed
+
+- **Dead references in version sync comment** — SKILL.md VERSION SYNC comment referenced `setup.sh` (a legacy repo-root script no longer relevant to the skill's install flow) and `README.md` (didn't exist inside the skill directory). Updated to only reference the files boot.sh actually touches during install: SKILL.md, boot.sh, CHANGELOG.md.
+- **boot.sh git status check scoped to relevant files** — Line 131 checked `git status --porcelain -- skill/ setup.sh boot.sh README.md`. `setup.sh` is a repo-root utility script that boot.sh never reads or writes — including it in the dirty-check was scope creep. Removed to limit the check to files directly managed by boot.sh.
+
+### Removed
+
+- **Dead asset `assets/page.tsx`** — A Next.js splash page component that was never deployed or referenced by any mechanism. boot.sh generates its own inline HTML for the popup preview (`download/index.html`), making this asset completely unused. Removed `assets/` directory entirely.
+
+### Added
+
+- **README.md** — Created inside `skill/stellar-frameworks/` with Quick Start, Invoke, Version History, and Architecture diagram.
+
+### Changed
+
+- **SKILL.md description optimized for triggering** — Per skill-creator guidelines, description rewritten to be more "pushy" with explicit trigger scenarios. Added "without exception" emphasis, explicit file format mentions (DOCX, PDF), and action verbs (build, fix, analyze, create, plan, process). Previous description was 218 chars focused on categories; new description is ~450 chars with concrete trigger phrases.
+
+### Why
+
+Audit via skill-creator revealed accumulated technical debt from 25+ versions of iterative development: (1) SKILL.md VERSION SYNC comment referenced `setup.sh` — a repo-root script that exists but is no longer part of the skill's install/update flow (boot.sh manages its own version, not setup.sh); (2) `assets/page.tsx` was a leftover from the v5.4.4 era when boot.sh managed a Next.js project directly — after the fullstack-dev handoff, this asset became dead code; (3) the skill description had drifted from the skill-creator's triggering guidelines, becoming too category-focused instead of action-focused.
+
+### Files Modified
+
+SKILL.md (description + version sync comment + cross-refs), boot.sh (git status check), procedure/phases.md (memory ref + Type 3 label), knowledge/platform/zai-sandbox.md (stale repo path), CHANGELOG.md (factual accuracy). Added: README.md. Removed: assets/page.tsx.
+
 ## [5.9.0] — 2026-05-19
 
 ### Fixed

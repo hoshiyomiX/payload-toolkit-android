@@ -65,18 +65,18 @@ Why: Caddy proxies requests to internal services based on the `XTransformPort` q
 | Path | Behavior | Why |
 |------|----------|-----|
 | `/home/z/my-project/` | Project root — always use absolute paths | Relative paths can resolve incorrectly depending on the working directory |
-| `/home/z/my-project/stellar-frameworks/` | Skill framework repo — has its own `.git/` | Git operations for stellar-frameworks MUST use `git -C /home/z/my-project/stellar-frameworks/` — never run bare `git` from parent |
+| `/home/z/.stellar-frameworks-repo/` | Skill framework repo — has its own `.git/` | Git operations for stellar-frameworks MUST use `git -C $HOME/.stellar-frameworks-repo/` — never run bare `git` from parent |
 | `skills/` | May be wiped on session reset | Use `boot.sh` to self-heal from git-tracked `skill/`; do not rely on `skills/` for persistence |
 | `download/` | May persist, but not guaranteed | Use `skills/` when persistence is required |
 | `/tmp/` | Session-scoped — cleaned up between sessions | Temporary files are not safe for cross-session storage |
 
 ### Git Repository Isolation
 
-`/home/z/my-project/` and `/home/z/my-project/stellar-frameworks/` are **separate git repositories**. They must never share git operations:
+`/home/z/my-project/` and `$HOME/.stellar-frameworks-repo/` are **separate git repositories**. They must never share git operations:
 
 ```
 # [REQUIRED] stellar-frameworks git operations
-git -C /home/z/my-project/stellar-frameworks/ <command>
+git -C $HOME/.stellar-frameworks-repo/ <command>
 
 # [BAN] never do this — operates on the parent repo, not the skill repo
 git <command>   # from /home/z/my-project/ without -C

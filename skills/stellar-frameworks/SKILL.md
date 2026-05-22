@@ -1,67 +1,47 @@
 ---
 name: stellar-frameworks
-description: "Activates on every task: coding (features, bugs, refactoring, scripts), documents, charts, data processing, or complex planning. Work runs through a phase machine with traceability IDs. Complexity adapts automatically."
+description: "Activates on every task without exception: coding (features, bugs, refactoring, scripts), documents (reports, proposals, DOCX, PDF), charts and visualizations, data processing, complex multi-step planning, or even simple questions. Provides a phase machine with traceability IDs, phase gates, and scope commitment that adapts complexity automatically. Use this skill whenever the user asks to build, fix, analyze, create, plan, or process anything — the framework runs internally for trivial tasks and fully for complex ones. Web development (Next.js, UI) is delegated to fullstack-dev; this framework wraps the phase machine around it."
 ---
-<!-- VERSION SYNC: on bump, update (1) metadata section below, (2) activation banner below, (3) boot.sh header, (4) setup.sh header, (5) README.md badge + invoke line + version history, (6) CHANGELOG.md -->
+<!-- VERSION SYNC: on bump, update (1) metadata section below, (2) activation banner below, (3) boot.sh header/banner/MINIMUM_VERSION, (4) setup.sh header/banner/version-check, (5) root README.md badge/invoke/file-structure/version-history, (6) skill/README.md version-history, (7) CHANGELOG.md -->
 
 ## Metadata
 
-- **version**: 5.9.0
+- **version**: 5.11.0
 
 ## Activation
 
 ```
-☄️ STELLAR · v5.9.0 · ACTIVE
+☄️ STELLAR · v5.11.0 · ACTIVE
    Phase State Machine · Traceability IDs · Phase Gates · Scope Commitment · Adaptive Pivot · SSV · SADC · Memory · Continuity · Universal
 ```
 
-This framework structures ALL work as a phase machine. It activates for every task — coding or not — without exception. What changes between tasks is the complexity tier, not whether the framework participates. Coding tasks get full phases with Traceability IDs and formal verification. Non-coding tasks (questions, explanations, recommendations) get Minimal tier — all phases still run, but SPECIFY, PLAN, and VERIFY happen internally (the agent thinks through them without outputting formal artifacts). Only IMPLEMENT produces visible work. Every task, regardless of type, gets a delivery report recording that the framework was followed.
+**Before any task output, complete these steps in order:**
 
-The Post-Activation Protocol below describes the steps to take after this framework loads. Follow it before producing any task output — it takes only a few seconds and ensures the phase machine runs correctly.
-
-## Post-Activation Protocol
-
-These steps bridge the gap between "the framework is loaded" and "the framework is running." Without them, agents tend to acknowledge the activation banner as decoration and proceed with generic task handling — skipping phases, ignoring templates, producing delivery reports as afterthoughts rather than evidence. The protocol exists because loading instructions is different from following them.
-
-### 1. Bootstrap Check (Self-Heal)
-
-After session resets or repo.tar restores, the runtime environment is incomplete — popup preview not running, auto-heal hooks missing from `$HOME`, git repo not cloned. This step repairs the environment before any task output.
-
-**Run this command before anything else:**
-
+**Step 1 — Bootstrap (~50ms, self-heal):**
 ```
 bash /home/z/my-project/boot.sh --fast
 ```
+Idempotent — prints "Skill files OK" if everything exists, clones repo if missing.
 
-This is idempotent: ~50ms if everything exists (prints "Skill files OK"), ~5s if the git repo needs cloning. It creates the popup preview on `:3000`, writes auto-heal hooks to `$HOME` init files, and clones the git repo. **Do not skip this step** — without it, popup preview will not work and subsequent sessions will not auto-heal.
+**Step 2 — Load phase intelligence:**
+Read `procedure/phases.md`. Also load the artifact template and knowledge files matching the current task from the Phase References table below.
 
-### 2. Load Phase Intelligence
+**Step 3 — Classify:**
+Determine: complexity tier (Minimal/Simple/Standard/Complex), task type (Coding/Document/Visualization/Data Processing/Non-Coding), and continuity (check preceding assistant message — if user references, approves, or follows up, this is a continuation; see Session Continuity below).
 
-Read `procedure/phases.md`. This file contains the phase definitions, gate criteria, complexity tier rules, and task-type adaptation details that the rest of this document references throughout. Without it, the phase machine is a diagram — phases.md is what makes it executable.
-
-For the current task, also load the relevant files from the Phase References table: the artifact template for the active phase, and the knowledge files that match the task type. Templates define the output format; knowledge files contain platform constraints that prevent common errors.
-
-### 3. Classify
-
-Before producing any task output, determine:
-
-- **Complexity tier**: Minimal, Simple, Standard, or Complex — this decides the ceremony level for each phase
-- **Task type**: Coding, Document, Visualization, Data Processing, or Non-Coding — this decides what each phase produces
-- **Continuity**: Check the immediately preceding assistant message — if the user's reply references, approves, corrects, or follows up on that output, this is a continuation (see Session Continuity below)
-
-### 4. Confirm Activation
-
-Output this block to signal that the framework is engaged:
-
+**Step 4 — Confirm activation:**
 ```
-☄️ STELLAR · v5.9.0 · ACTIVE
+☄️ STELLAR · v5.11.0 · ACTIVE
    Phase: IDLE → SPECIFY
    Complexity: [tier] | Task Type: [type] | Continuation: [NEW / YES]
 ```
 
-### 5. Enter the Phase Machine
+**Step 5 — Enter phase machine:**
+Begin SPECIFY (or IMPLEMENT if continuation detected). All phases always run.
 
-Begin SPECIFY (or IMPLEMENT if continuation is detected and the user approved a prior plan). All phases always run — what changes between tiers is the formality, not whether phases execute. See `procedure/phases.md` for what each phase requires.
+---
+
+This framework structures ALL work as a phase machine. It activates for every task — coding or not — without exception. What changes between tasks is the complexity tier, not whether the framework participates. Coding tasks get full phases with Traceability IDs and formal verification. Non-coding tasks (questions, explanations, recommendations) get Minimal tier — all phases still run, but SPECIFY, PLAN, and VERIFY happen internally (the agent thinks through them without outputting formal artifacts). Only IMPLEMENT produces visible work. Every task, regardless of type, gets a delivery report recording that the framework was followed.
 
 ## Limitations
 
@@ -86,7 +66,7 @@ On error: assess (code bug or approach failure?), fix or pivot, return to VERIFY
 | VERIFY | Run checks, trace edge cases, confirm Traceability IDs satisfied |
 | DELIVER | Present results with attestation |
 
-Phase definitions, entry/exit criteria, and transition rules are in `procedure/phases.md` — the same file the Post-Activation Protocol asks you to read first.
+Phase definitions, entry/exit criteria, and transition rules are in `procedure/phases.md` — the same file Step 2 of Activation asks you to read first.
 
 ## Session Continuity
 
@@ -140,7 +120,7 @@ This framework is not limited to coding tasks. The phase machine adapts to the t
 
 | Task Type | SPECIFY | PLAN | IMPLEMENT | VERIFY |
 |-----------|---------|------|------------|--------|
-| **Coding** (web dev, bug fix, refactor) | Problem spec | Code steps + Traceability IDs | Write code | Lint, type check, tests |
+| **Coding** (bug fix, refactor, scripts) | Problem spec | Code steps + Traceability IDs | Write code | Lint, type check, tests |
 | **Document** (report, proposal, DOCX, PDF) | Content outline | Section plan + structure | Generate document | Format check, completeness |
 | **Visualization** (charts, diagrams, dashboards) | Visual requirements | Data mapping + layout | Generate chart | Visual accuracy, data integrity |
 | **Data Processing** (ETL, analysis, transform) | Data spec | Transform pipeline | Write script | Output validation |
@@ -301,4 +281,4 @@ Self-graded. The evidence requirement makes fabrication harder but cannot guaran
 
 ## Completion Signal
 
-For web development tasks (Type 3), the DELIVER phase must call the platform's `Complete(project_type="web_dev", summary="...")` tool to finalize the project. For non-coding tasks, DELIVER presents the output file path directly. **In all cases, DELIVER must append a Task State Snapshot to `worklog.md`** — see Worklog Continuity Protocol in Session Continuity above.
+For interactive web development tasks (Next.js, UI components, dashboards), implementation is delegated to fullstack-dev — the DELIVER phase calls the platform's `Complete(project_type="web_dev", summary="...")` tool to finalize. For non-web coding tasks, DELIVER presents output file paths. **In all cases, DELIVER must append a Task State Snapshot to `worklog.md`** — see Worklog Continuity Protocol in Session Continuity above.

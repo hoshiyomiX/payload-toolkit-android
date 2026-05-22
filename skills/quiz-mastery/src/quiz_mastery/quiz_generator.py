@@ -94,7 +94,12 @@ Level {level}: {level_desc[level]}
 5. 简答题 (short_answer)：answer 填参考答案
 6. 每道题必须包含 explanation（解析）
 7. 题目内容必须基于上述知识点的名称、定义和描述，不要超出范围
-8. 总题数：{num_questions} 道
+8. **每道题必须填写 `category` 和 `knowledge_point` 字段**（用于分类筛选和侧栏分组）：
+   - `category`：一级分类，**短词**（建议 2-6 字），用于顶部分类筛选 chip。
+     例：物理 / 数学 / 法律 / 历史 / 编程 / 通用 等。
+     **不要**写成长串、不要含日期、不要含编号、不要含书名号或斜杠。
+   - `knowledge_point`：所属知识点名称（直接用关联知识点的 title 即可），用于侧栏分组。
+9. 总题数：{num_questions} 道
 
 ## 输出格式
 输出纯 JSON 数组，每个元素格式如下：
@@ -103,6 +108,8 @@ Level {level}: {level_desc[level]}
   {{
     "id": "q_001",
     "knowledge_point_ids": ["kp_id"],
+    "category": "物理",
+    "knowledge_point": "牛顿第二定律",
     "level": {level},
     "type": "single_choice",
     "prompt": "题目内容",

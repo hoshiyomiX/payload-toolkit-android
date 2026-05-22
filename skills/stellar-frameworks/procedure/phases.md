@@ -63,7 +63,7 @@ Phase transitions are guarded. A phase cannot begin until its entry condition is
    - **Visualization**: Charts, diagrams, mind maps, dashboards.
    - **Data Processing**: ETL, analysis, transform, Python scripts.
    - **Non-Coding**: Questions, explanations, recommendations — no code or file output.
-5. Check `memory/MEMORY.md` for user preferences, patterns, and key decisions. If the `memory/` directory does not exist, it will be created on first DELIVER — skip this step. For tasks requiring session continuity, also check the most recent dated file in `memory/`. **Note**: For context-truncation recovery, the worklog (step 2a above) takes priority over memory files — it captures immediate task state, while memory captures long-term patterns.
+5. Check `memory/MEMORY.md` for user preferences, patterns, and key decisions. If the `memory/` directory does not exist, it will be created on first DELIVER — skip this step. For tasks requiring session continuity, also check the most recent dated file in `memory/`. See `memory-template.md` for memory system architecture, templates, and storage rules. **Note**: For context-truncation recovery, the worklog (step 2a above) takes priority over memory files — it captures immediate task state, while memory captures long-term patterns.
 6. If the task involves a git repository and the session was continued from a previous conversation (context compression boundary), flag the repository as "state-uncertain" and require Source State Verification in SPECIFY.
 7. Transition to SPECIFY (or IMPLEMENT/VERIFY if continuation detected).
 
@@ -318,7 +318,7 @@ All phases use their full templates with extra detail. Traceability IDs required
 6. Present verification report summary.
 7. State caveats or follow-up items.
 8. Output **Delivery Report** — use the compact format for Simple tasks, full format for Standard/Complex (see Delivery Reports in SKILL.md). Include Scope Drift (comparison against Scope Commitment) and Pivot (if approach changed) fields.
-9. **Completion signal**: For web development tasks (Type 3 / Coding), call `Complete(project_type="web_dev", summary="...")`. For non-coding tasks, present the output file path directly.
+9. **Completion signal**: For web development tasks (Coding), call `Complete(project_type="web_dev", summary="...")`. For non-coding tasks, present the output file path directly.
 
 **Artifacts**: None new. Consumes verification report. Writes to `worklog.md` (Task State Snapshot) and `memory/YYYY-MM-DD.md` (Session Digest).
 
