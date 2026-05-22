@@ -608,7 +608,9 @@ def run(*args, **kwargs):
     compress_alg = str(params.get("compress", "gzip")).lower()
     output_path = str(params.get("output_path", "flashable_dd.zip"))
     device = str(params.get("device", ""))
-    level = int(params.get("level", 0)) or None  # 0 means use default
+    # Accept both 'level' and 'compress_level' keys (CLI sends 'compress_level')
+    level_raw = params.get("compress_level") or params.get("level")
+    level = int(level_raw) if level_raw is not None else 6  # default to 6 (balanced)
     skip_verify = str(params.get("skip_verify", "false")).lower() in ("true", "1", "yes")
 
     lines = []
@@ -653,7 +655,7 @@ def run(*args, **kwargs):
         for name, path in images.items():
             size = os.path.getsize(path)
             lines.append(f"  {name} ({_human_size(size)})")
-        level_display = f" (level {level})" if level else ""
+        level_display = f" (level {level})"
         lines.append(f"Compression: {compress_name}{level_display}")
         if skip_verify:
             lines.append("Verification: disabled")
@@ -675,14 +677,26 @@ def run(*args, **kwargs):
         for i, (name, path) in enumerate(images.items()):
             _report_progress(1 + i, 2 + num_parts, f"Compressing {name}")
 
-            raw_data = open(path, "rb").read()
+            # Stream-read file: hash while reading to avoid double pass
+            sha = hashlib.sha256()
+            raw_chunks = []
+            with open(path, "rb") as f:
+                while True:
+                    chunk = f.read(1 << 20)  # 1 MB chunks
+                    if not chunk:
+                        break
+                    sha.update(chunk)
+                    raw_chunks.append(chunk)
+            raw_data = b"".join(raw_chunks)
+            del raw_chunks  # free chunk list
             unc_size = len(raw_data)
-            hash_hex = hashlib.sha256(raw_data).hexdigest()
+            hash_hex = sha.hexdigest()
 
             if compress_id == 0:
                 comp_data = raw_data
             else:
                 comp_data = compress(raw_data, compress_alg, level=level)
+            del raw_data  # free raw data after compression
 
             comp_size = len(comp_data)
             data_offset = len(data_blobs)
@@ -696,6 +710,7 @@ def run(*args, **kwargs):
             })
 
             data_blobs.extend(comp_data)
+            del comp_data  # free compressed data after appending
 
             aligned = _align_up(len(data_blobs), ALIGN)
             if aligned > len(data_blobs):
@@ -704,7 +719,7 @@ def run(*args, **kwargs):
             lines.append(f"    {name}: {unc_size:,} -> {comp_size:,} bytes "
                          f"({100 * comp_size / max(unc_size, 1):.1f}%)")
 
-        bundle_data = header + bytes(data_blobs)
+        bundle_data = header + data_blobs
         bundle_size = len(bundle_data)
         lines.append(f"  Bundle size: {_human_size(bundle_size)}")
         lines.append("")
@@ -733,11 +748,23 @@ def run(*args, **kwargs):
 
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
-        with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_STORED) as zf:
-            zf.writestr("ddbundle.bin", bundle_data)
-            zf.writestr("flash_info.txt", flash_info)
-            zf.writestr("META-INF/com/google/android/update-binary", update_binary)
-            zf.writestr("META-INF/com/google/android/updater-script", updater_script)
+        # Write ddbundle.bin to temp file to avoid double-copying in memory
+        bundle_tmp = tempfile.NamedTemporaryFile(suffix=".bin", delete=False)
+        try:
+            bundle_tmp.write(bundle_data)
+            bundle_tmp.close()
+            del bundle_data  # free memory before ZIP creation
+
+            with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_STORED) as zf:
+                zf.write(bundle_tmp.name, "ddbundle.bin")
+                zf.writestr("flash_info.txt", flash_info)
+                zf.writestr("META-INF/com/google/android/update-binary", update_binary)
+                zf.writestr("META-INF/com/google/android/updater-script", updater_script)
+        finally:
+            try:
+                os.unlink(bundle_tmp.name)
+            except OSError:
+                pass
 
         zip_size = os.path.getsize(output_path)
         lines.append(f"  ZIP size: {_human_size(zip_size)}")
