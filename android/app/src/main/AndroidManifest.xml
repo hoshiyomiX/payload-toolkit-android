@@ -98,7 +98,7 @@
 
         <!-- Foreground service for long-running local operations -->
         <service
-            android:name="service.PayloadService"
+            android:name=".service.PayloadService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
