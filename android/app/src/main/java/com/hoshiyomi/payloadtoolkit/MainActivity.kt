@@ -695,14 +695,81 @@ class MainActivity : AppCompatActivity() {
             putExtra("output_path", outPath)
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
-        } else {
-            startService(serviceIntent)
+        try {
+            if (Build.VERSION.SDK.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+        } catch (e: Exception) {
+            // Foreground service failed (e.g. Samsung OneUI, MIUI restrictions)
+            // Fall back to direct lifecycleScope execution
+            showLog("[WARN] Service failed: ${e.message?.take(80)}\n", LogLevel.WARN)
+            showLog("[INFO] Falling back to direct execution...\n\n", LogLevel.INFO)
+            serviceIntent = null  // Signal fallback
+            lifecycleScope.launch {
+                val result = executeRepack()
+                handleRepackResult(
+                    success = result.success,
+                    output = result.output,
+                    error = result.error,
+                    durationMs = result.durationMs
+                )
+                isExecuting = false
+                setUIExecuting(false)
+            }
+            return
         }
     }
 
     private var _lastOutputPath: String = ""
+
+    /**
+     * Execute repack directly (fallback when foreground service fails).
+     * Runs in the calling coroutine — should be launched from lifecycleScope.
+     */
+    private suspend fun executeRepack(): PayloadResult {
+        if (imageFiles.isEmpty()) {
+            return PayloadResult.error("No partition images added. Use 'Add Images' button.")
+        }
+
+        val outDir = outputDirPath ?: outputDir.absolutePath
+        File(outDir).mkdirs()
+
+        val images = imageFiles.toMap()
+
+        val customName = prefs.getString("pref_custom_filename", "")?.trim()
+        val outputFileName = if (!customName.isNullOrEmpty()) {
+            if (customName.lowercase().endsWith(".zip")) customName else "$customName.zip"
+        } else {
+            PayloadBridge.buildOutputFileName(images, selectedCompression)
+        }
+        val outPath = File(outDir, outputFileName).absolutePath
+
+        // Read device metadata from UI field (empty = use default)
+        val deviceInput = findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.editTextDevice)
+            ?.text?.toString()?.trim() ?: ""
+        prefs.edit { putString("device", deviceInput) }
+        val device = deviceInput.ifEmpty { "generic" }
+
+        showLog("Partitions (${images.size}):\n", LogLevel.INFO)
+        images.entries.sortedBy { it.key }.forEach { (name, path) ->
+            val file = File(path)
+            showLog("  $name (${formatFileSize(file.length())})\n")
+        }
+        showLog("Compression: $selectedCompression (level $selectedCompressionLevel)\n", LogLevel.INFO)
+        showLog("Device: $device\n", LogLevel.INFO)
+        showLog("Output file: $outputFileName\n", LogLevel.INFO)
+        showLog("Output path: $outPath\n\n", LogLevel.INFO)
+
+        return PayloadBridge.dd(
+            images = images,
+            device = device,
+            compression = selectedCompression,
+            level = selectedCompressionLevel,
+            outputPath = outPath
+        )
+    }
 
     /**
      * Handle progress update broadcast from PayloadService.
@@ -737,7 +804,7 @@ class MainActivity : AppCompatActivity() {
             if (output.isNotBlank()) showLog(output)
         }
         showLog("\u2550".repeat(50) + "\n\n")
-        showLog("[INFO] Foreground service stopped\n", LogLevel.INFO)
+        showLog("[INFO] Repack finished\n", LogLevel.INFO)
     }
 
     // ═══════════════════════════════════════════════════
