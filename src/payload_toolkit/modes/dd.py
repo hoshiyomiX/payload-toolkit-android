@@ -749,7 +749,21 @@ def run(*args, **kwargs):
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
         # Write ddbundle.bin to temp file to avoid double-copying in memory
-        bundle_tmp = tempfile.NamedTemporaryFile(suffix=".bin", delete=False)
+        # Defensive: ensure TMPDIR exists (Android has no /tmp by default).
+        # We set TMPDIR in pybridge.c / PythonBridge.kt, but create it here
+        # as a safety net. Avoid tempfile.gettempdir() — it also throws
+        # FileNotFoundError if TMPDIR is missing; compute from env directly.
+        _tmpdir = os.environ.get("TMPDIR", "")
+        if _tmpdir and not os.path.isdir(_tmpdir):
+            try:
+                os.makedirs(_tmpdir, exist_ok=True)
+            except OSError:
+                pass
+        if not _tmpdir or not os.path.isdir(_tmpdir):
+            # Last resort: use output directory as temp dir
+            _tmpdir = os.path.dirname(os.path.abspath(output_path))
+            os.makedirs(_tmpdir, exist_ok=True)
+        bundle_tmp = tempfile.NamedTemporaryFile(suffix=".bin", delete=False, dir=_tmpdir)
         try:
             bundle_tmp.write(bundle_data)
             bundle_tmp.close()

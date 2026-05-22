@@ -152,6 +152,8 @@ static wchar_t *utf8_to_wcs(const char *utf8)
  *  non-fatal — individual libs failing to load is OK.
  * ═══════════════════════════════════════════════════════════════ */
 
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <dirent.h>
 
 static void preload_native_libs(const char *lib_dir) {
@@ -214,6 +216,18 @@ Java_com_hoshiyomi_payloadtoolkit_PyBridge_nativeRunPython(
     setenv("PYTHONUNBUFFERED", "1", 1);
     setenv("PYTHONHOME", stdlib_dir, 1);
     setenv("PYTHONIOENCODING", "utf-8", 1);
+
+    /*
+     * Set TMPDIR for Python's tempfile module.
+     * Android has no /tmp, and Chaquopy's stdlib/../tmp may not exist.
+     * Use stdlib/../tmp and create it if missing (app-internal, always writable).
+     */
+    {
+        char tmpdir[1024];
+        snprintf(tmpdir, sizeof(tmpdir), "%s/../tmp", stdlib_dir);
+        mkdir(tmpdir, 0755);  /* no-op if already exists */
+        setenv("TMPDIR", tmpdir, 1);
+    }
 
     /*
      * Tell Python to search nativeLibraryDir for extension modules.

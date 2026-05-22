@@ -200,3 +200,35 @@ Stage Summary:
 - Push successful: 3c0fc36..08977a2 main -> main
 - CI run 26268448229: PASS (Build APK)
 - CI URL: https://github.com/hoshiyomiX/payload-toolkit-android/actions/runs/26268448229
+
+---
+Task ID: 6
+Agent: Super Z (main)
+Task: Fix crash ketika start repacking — remove foreground service entirely
+
+Work Log:
+- Invoked Skill(command="stellar-frameworks") v5.9.0
+- Continuation: user reports crash still happening after compilation fix (08977a2)
+- Deep analysis: traced crash to PayloadService.onStartCommand() → startForeground()
+  - The try-catch in onRepackClicked() only catches startForegroundService() exceptions
+  - Once startForegroundService() returns (no exception), the service lifecycle is independent
+  - PayloadService.onStartCommand() calls startForeground(ID, notif, DATA_SYNC)
+  - On Android 14 + certain OEMs, startForeground() throws SecurityException
+  - This kills the app process — uncatchable from Activity's try-catch
+- Decision: Remove foreground service path entirely, use lifecycleScope as primary
+- IMPL-001: Removed startForegroundService intent + try-catch from onRepackClicked()
+- IMPL-002: Changed to lifecycleScope.launch { executeRepack() } as sole path
+- IMPL-003: Refactored executeRepack() to accept pre-computed params (no UI re-reads from IO)
+- IMPL-004: Added onProgress callback in executeRepack() for direct progress bar updates
+- IMPL-005: Removed dead code: PayloadService import, BroadcastReceiver, onStart/onStop
+- IMPL-006: Removed handleRepackProgress (broadcast-based, replaced by callback)
+- Net change: -125 lines, cleaner architecture
+- Committed as ca0c139, pushed to origin/main
+- CI run 26271695184: PASS (Build APK)
+
+Stage Summary:
+- Commit ca0c139 "fix: remove foreground service, use lifecycleScope as primary repack path"
+- Root cause: startForeground() crash inside service (uncatchable from Activity)
+- Fix: Eliminated foreground service dependency entirely
+- Progress bar now works via onProgress callback (not broadcast)
+- CI: https://github.com/hoshiyomiX/payload-toolkit-android/actions/runs/26271695184

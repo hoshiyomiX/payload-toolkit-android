@@ -813,7 +813,9 @@ object PythonBridge {
             env["LD_LIBRARY_PATH"] = libDir
             env["PYTHONHOME"] = stdlibDir!!
             env["PYTHONPATH"] = libDir
-            env["TMPDIR"] = File(stdlibDir!!, "../tmp").absolutePath
+            env["TMPDIR"] = File(stdlibDir!!, "../tmp").absolutePath.also {
+                File(it).mkdirs()  // Ensure tmp dir exists for Python tempfile
+            }
             env["PYTHONUNBUFFERED"] = "1"
 
             val preloadLibs = mutableListOf<File>()
