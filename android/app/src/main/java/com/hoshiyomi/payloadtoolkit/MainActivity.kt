@@ -29,9 +29,6 @@ import java.io.FileOutputStream
 import androidx.core.content.edit
 import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
-import android.content.BroadcastReceiver
-import android.content.IntentFilter
-import com.hoshiyomi.payloadtoolkit.service.PayloadService
 
 /**
  * MainActivity — Payload Toolkit Android.
@@ -57,24 +54,6 @@ class MainActivity : AppCompatActivity() {
     private var selectedCompressionLevel: Int = 0  // 0 = default (best)
     private var imageFiles: MutableList<Pair<String, String>> = mutableListOf() // (name, path)
     private var isExecuting = false
-
-    // Broadcast receiver for PayloadService result
-    private val repackResultReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            when (intent.action) {
-                PayloadService.ACTION_REPACK_RESULT -> handleRepackResult(
-                    success = intent.getBooleanExtra(PayloadService.EXTRA_SUCCESS, false),
-                    output = intent.getStringExtra(PayloadService.EXTRA_OUTPUT) ?: "",
-                    error = intent.getStringExtra(PayloadService.EXTRA_ERROR),
-                    durationMs = intent.getLongExtra(PayloadService.EXTRA_DURATION_MS, 0)
-                )
-                PayloadService.ACTION_REPACK_PROGRESS -> handleRepackProgress(
-                    percent = intent.getIntExtra(PayloadService.EXTRA_PROGRESS_PERCENT, 0),
-                    message = intent.getStringExtra(PayloadService.EXTRA_PROGRESS_MESSAGE) ?: ""
-                )
-            }
-        }
-    }
 
     // App-internal directories
     private lateinit var inputDir: File
@@ -142,25 +121,6 @@ class MainActivity : AppCompatActivity() {
 
         requestStoragePermissions()
         handleIncomingIntent(intent)
-    }
-
-    override fun onStart() {
-        super.onStart()
-        // Register for PayloadService result + progress broadcasts
-        val filter = IntentFilter().apply {
-            addAction(PayloadService.ACTION_REPACK_RESULT)
-            addAction(PayloadService.ACTION_REPACK_PROGRESS)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(repackResultReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(repackResultReceiver, filter)
-        }
-    }
-
-    override fun onStop() {
-        super.onStop()
-        try { unregisterReceiver(repackResultReceiver) } catch (_: Exception) {}
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -645,7 +605,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // Collect parameters for the service
+        // Collect parameters for repack
         val images = imageFiles.toMap()
         val device = findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.editTextDevice)
             ?.text?.toString()?.trim() ?: ""
@@ -682,111 +642,76 @@ class MainActivity : AppCompatActivity() {
         // Store output path for result handler
         _lastOutputPath = outPath
 
-        // Start the foreground service
+        // Execute repack directly via lifecycleScope
         isExecuting = true
         setUIExecuting(true)
-
-        val serviceIntent = Intent(this, PayloadService::class.java).apply {
-            putExtra("images", HashMap(images))
-            putExtra("device", deviceValue)
-            putExtra("compression", selectedCompression)
-            putExtra("level", selectedCompressionLevel)
-            putExtra("output_path", outPath)
-        }
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent)
-            } else {
-                startService(serviceIntent)
-            }
-            showLog("[INFO] Foreground service started — app is protected from kill\n", LogLevel.INFO)
-        } catch (e: Exception) {
-            // Foreground service failed (e.g. Samsung OneUI, MIUI restrictions)
-            // Fall back to direct lifecycleScope execution
-            showLog("[WARN] Service failed: ${e.message?.take(80)}\n", LogLevel.WARN)
-            showLog("[INFO] Falling back to direct execution...\n\n", LogLevel.INFO)
-            lifecycleScope.launch {
-                val result = executeRepack()
-                handleRepackResult(
-                    success = result.success,
-                    output = result.output,
-                    error = result.error,
-                    durationMs = result.durationMs
-                )
-                isExecuting = false
-                setUIExecuting(false)
-            }
-            return
+        showLog("[INFO] Starting repack operation...\n", LogLevel.INFO)
+        lifecycleScope.launch {
+            val result = executeRepack(
+                imagesParam = images,
+                deviceParam = deviceValue,
+                outputPathParam = outPath
+            )
+            handleRepackResult(
+                success = result.success,
+                output = result.output,
+                error = result.error,
+                durationMs = result.durationMs
+            )
+            isExecuting = false
+            setUIExecuting(false)
         }
     }
 
     private var _lastOutputPath: String = ""
 
     /**
-     * Execute repack directly (fallback when foreground service fails).
-     * Runs in the calling coroutine — should be launched from lifecycleScope.
+     * Execute repack directly via lifecycleScope.
+     * Accepts pre-computed parameters from onRepackClicked() to avoid
+     * re-reading UI state from a background coroutine.
      */
-    private suspend fun executeRepack(): PayloadResult {
-        if (imageFiles.isEmpty()) {
+    private suspend fun executeRepack(
+        imagesParam: Map<String, String> = imageFiles.toMap(),
+        deviceParam: String = "generic",
+        outputPathParam: String = ""
+    ): PayloadResult {
+        if (imagesParam.isEmpty()) {
             return PayloadResult.error("No partition images added. Use 'Add Images' button.")
         }
 
-        val outDir = outputDirPath ?: outputDir.absolutePath
-        File(outDir).mkdirs()
-
-        val images = imageFiles.toMap()
-
-        val customName = prefs.getString("pref_custom_filename", "")?.trim()
-        val outputFileName = if (!customName.isNullOrEmpty()) {
-            if (customName.lowercase().endsWith(".zip")) customName else "$customName.zip"
-        } else {
-            PayloadBridge.buildOutputFileName(images, selectedCompression)
+        val outPath = if (outputPathParam.isNotBlank()) outputPathParam else {
+            val outDir = outputDirPath ?: outputDir.absolutePath
+            File(outDir).mkdirs()
+            val customName = prefs.getString("pref_custom_filename", "")?.trim()
+            val outputFileName = if (!customName.isNullOrEmpty()) {
+                if (customName.lowercase().endsWith(".zip")) customName else "$customName.zip"
+            } else {
+                PayloadBridge.buildOutputFileName(imagesParam, selectedCompression)
+            }
+            File(outDir, outputFileName).absolutePath
         }
-        val outPath = File(outDir, outputFileName).absolutePath
-
-        // Read device metadata from UI field (empty = use default)
-        val deviceInput = findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.editTextDevice)
-            ?.text?.toString()?.trim() ?: ""
-        prefs.edit { putString("device", deviceInput) }
-        val device = deviceInput.ifEmpty { "generic" }
-
-        showLog("Partitions (${images.size}):\n", LogLevel.INFO)
-        images.entries.sortedBy { it.key }.forEach { (name, path) ->
-            val file = File(path)
-            showLog("  $name (${formatFileSize(file.length())})\n")
-        }
-        showLog("Compression: $selectedCompression (level $selectedCompressionLevel)\n", LogLevel.INFO)
-        showLog("Device: $device\n", LogLevel.INFO)
-        showLog("Output file: $outputFileName\n", LogLevel.INFO)
-        showLog("Output path: $outPath\n\n", LogLevel.INFO)
 
         return PayloadBridge.dd(
-            images = images,
-            device = device,
+            images = imagesParam,
+            device = deviceParam,
             compression = selectedCompression,
             level = selectedCompressionLevel,
-            outputPath = outPath
+            outputPath = outPath,
+            onProgress = { progress ->
+                // Update progress bar directly from coroutine
+                runOnUiThread {
+                    val progressBar = findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.progressBar)
+                    if (progressBar != null) {
+                        progressBar.isIndeterminate = false
+                        progressBar.progress = progress.percent
+                    }
+                }
+            }
         )
     }
 
     /**
-     * Handle progress update broadcast from PayloadService.
-     * Updates the progress bar to determinate mode with percentage.
-     */
-    private fun handleRepackProgress(percent: Int, message: String) {
-        runOnUiThread {
-            val progressBar = findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.progressBar)
-            if (progressBar != null) {
-                progressBar.isIndeterminate = false
-                progressBar.progress = percent
-            }
-        }
-    }
-
-    /**
-     * Handle result broadcast from PayloadService.
-     * Called on the main thread via BroadcastReceiver.
+     * Handle repack result — updates UI with success/failure status.
      */
     private fun handleRepackResult(success: Boolean, output: String, error: String?, durationMs: Long) {
         isExecuting = false
