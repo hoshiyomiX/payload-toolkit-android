@@ -33,9 +33,9 @@
     <!-- Internet permission (for downloading payload files in future) -->
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- Foreground service (for long-running dump/gen operations) -->
+    <!-- Foreground service (for long-running local file compression) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <!-- Notification permission (Android 13+ for foreground service notification) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -96,11 +96,15 @@
             </intent-filter>
         </activity>
 
-        <!-- Foreground service for long-running operations -->
+        <!-- Foreground service for long-running local operations -->
         <service
-            android:name=".service.PayloadService"
+            android:name="service.PayloadService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Local file compression to generate flashable OTA ZIP archives" />
+        </service>
 
         <!-- FileProvider for sharing generated files -->
         <provider
