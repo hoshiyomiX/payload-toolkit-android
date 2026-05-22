@@ -54,7 +54,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei
 .cat-group{margin-bottom:2px}
 .cat-top{padding:8px 16px;font-size:13px;font-weight:700;color:#2d3142;background:#fafbfd;display:flex;align-items:center;gap:6px;position:sticky;top:0;z-index:1;border-bottom:1px solid #f0f2f7}
 .cat-count{font-size:11px;color:#a8adbd;font-weight:normal}
-.cat-sub{padding:6px 16px 8px 16px}
+.cat-law{padding:8px 16px 4px 16px;font-size:12px;font-weight:600;color:#5a607a;display:flex;gap:6px;align-items:flex-start;line-height:1.45;border-top:1px solid #f5f6fa}
+.cat-law:first-of-type{border-top:none}
+.cat-law-name{flex:1;word-break:break-word}
+.cat-law-count{font-size:10px;color:#a8adbd;font-weight:normal;background:#f0f2f7;padding:1px 6px;border-radius:8px;flex-shrink:0;margin-top:2px}
+.cat-sub{padding:4px 16px 6px 24px}
+.cat-sub-flat{padding:10px 16px 12px 16px}
 .cat-sub-name{font-size:11px;color:#a8adbd;margin-bottom:5px;line-height:1.4}
 .cat-nums{display:flex;flex-wrap:wrap;gap:3px}
 .qnum{display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:26px;padding:0 6px;border-radius:5px;font-size:12px;cursor:pointer;transition:all .15s;border:1.5px solid transparent;background:#f5f6fa;color:#5b6172;font-weight:600}
@@ -260,6 +265,8 @@ body.dark .io-btns button.exam{background:rgba(232,140,165,0.15);border-color:#e
 body.dark .left{background:#16213e;border-right-color:#0f3460}
 body.dark .left-scroll::-webkit-scrollbar-thumb{background:#333}
 body.dark .cat-top{background:#16213e;color:#e0e3ed;border-bottom-color:#0f3460}
+body.dark .cat-law{color:#c5cad8;border-top-color:#1f2a44}
+body.dark .cat-law-count{background:#1f2a44;color:#888}
 body.dark .cat-count{color:#666}
 body.dark .qnum{background:rgba(100,100,100,0.15);color:#777;border-color:transparent}
 body.dark .qnum:hover{border-color:#e88ca5;color:#fff}
@@ -507,6 +514,9 @@ function init() {
   buildSidebar();
   applyFilters();
   updateStats();
+
+  // 默认选中筛选结果中的第 1 题（首次进入不再是空白态）
+  if (filteredIds.length > 0) selectQ(filteredIds[0]);
 }
 
 function loadState() {
@@ -534,8 +544,8 @@ function loadFilters() {
     if (!activeFilters[btn.dataset.f]) btn.classList.add('off');
   });
 
-  // 学科：默认全选
-  const cats = [...new Set(QS.map(q => (q.category || '通用').trim()))];
+  // 学科：默认全选（只取一级分类）
+  const cats = [...new Set(QS.map(getCatKey))];
   try {
     const raw = localStorage.getItem(CATS_KEY);
     const arr = raw ? JSON.parse(raw) : null;
@@ -543,10 +553,31 @@ function loadFilters() {
   } catch (e) { activeCats = new Set(cats); }
 }
 
-/* ===== 分类 chips（按"学科/子分类"完整路径展示） ===== */
+/* ===== 分类解析 =====
+   category 形如 "通用类 / 1.中华人民共和国证券法（…）"：
+     一级（顶部 chip + 侧栏顶 cat-top）= 斜杠前的 "通用类"
+     二级（侧栏 cat-sub-top，法规名）  = 斜杠后剩余部分
+   knowledge_point 形如 "一、法律/1.中华人民共和国证券法（…）/《证券法》适用范围"：
+     真正的知识点 = 最后一段 "《证券法》适用范围"
+   既兼容旧扁平数据（无斜杠），又把 badcase 里冗余的层级路径清掉。
+*/
+function splitCat(raw) {
+  const s = (raw || '通用').trim();
+  const i = s.indexOf('/');
+  if (i < 0) return { top: s, sub: '' };
+  return { top: s.slice(0, i).trim() || '通用', sub: s.slice(i + 1).trim() };
+}
 function getCatKey(q) {
-  // category 字段已含 "物理 / 电学" 这种完整路径，直接用即可
-  return (q.category || '通用').trim();
+  return splitCat(q.category).top;
+}
+function getSubCat(q) {
+  return splitCat(q.category).sub;
+}
+function getKpLeaf(q) {
+  const raw = (q.knowledge_point || q.knowledge || '').trim();
+  if (!raw) return '未分类';
+  const parts = raw.split('/').map(s => s.trim()).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : '未分类';
 }
 function buildCatChips() {
   const cats = [...new Set(QS.map(getCatKey))];
@@ -581,30 +612,66 @@ function toggleCat(cat, el) {
 
 /* ===== 侧栏 ===== */
 function buildSidebar() {
+  // 三层：一级分类 → 法规（category 后段） → 知识点（knowledge_point 最后一段）
   const groups = {};
   QS.forEach(q => {
     const cat = getCatKey(q);
     if (!activeCats.has(cat)) return;
-    const sub = q.knowledge_point || q.knowledge || '未分类';
+    const law = getSubCat(q) || '通用';   // 二级：法规名
+    const kp = getKpLeaf(q);              // 三级：知识点叶子
     if (!groups[cat]) groups[cat] = {};
-    if (!groups[cat][sub]) groups[cat][sub] = [];
-    groups[cat][sub].push(q);
+    if (!groups[cat][law]) groups[cat][law] = {};
+    if (!groups[cat][law][kp]) groups[cat][law][kp] = [];
+    groups[cat][law][kp].push(q);
   });
 
   const container = document.getElementById('leftScroll');
   container.innerHTML = '';
   Object.keys(groups).forEach(cat => {
-    const subs = groups[cat];
-    const total = Object.values(subs).reduce((s, arr) => s + arr.length, 0);
+    const laws = groups[cat];
+    const lawKeys = Object.keys(laws);
+    const total = Object.values(laws).reduce(
+      (s, kps) => s + Object.values(kps).reduce((n, arr) => n + arr.length, 0), 0
+    );
+
+    // 兜底：如果该一级下没有任何有效二级 / 三级（法规名都是"通用" 且 知识点都是"未分类"），
+    // 直接平铺题号，避免出现一个孤零零的"未分类"中间层
+    const hasLaw = lawKeys.some(l => l && l !== '通用');
+    const hasKp = lawKeys.some(l => Object.keys(laws[l]).some(k => k && k !== '未分类'));
+    const flat = !hasLaw && !hasKp;
+
     let html = `<div class="cat-group"><div class="cat-top">📂 ${escapeHtml(cat)} <span class="cat-count">${total}题</span></div>`;
-    Object.keys(subs).forEach(sub => {
-      html += `<div class="cat-sub"><div class="cat-sub-name">${escapeHtml(sub)}</div><div class="cat-nums">`;
-      subs[sub].forEach(q => {
+
+    if (flat) {
+      // 收集所有题号，按 id 排序后一把铺出来
+      const allQs = [];
+      lawKeys.forEach(l => Object.values(laws[l]).forEach(arr => allQs.push(...arr)));
+      allQs.sort((a, b) => a.id - b.id);
+      html += `<div class="cat-sub cat-sub-flat"><div class="cat-nums">`;
+      allQs.forEach(q => {
         const st = states[q.id] || 'unstudied';
         html += `<span class="qnum ${st}" data-id="${q.id}" onclick="selectQ(${q.id})">${q.id}</span>`;
       });
       html += `</div></div>`;
-    });
+    } else {
+      lawKeys.forEach(law => {
+        const kps = laws[law];
+        const lawTotal = Object.values(kps).reduce((n, arr) => n + arr.length, 0);
+        // 法规名长，可能换行；用 title 兜底显示完整原文
+        if (law && law !== '通用') {
+          html += `<div class="cat-law" title="${escapeHtml(law)}"><span class="cat-law-name">${escapeHtml(law)}</span><span class="cat-law-count">${lawTotal}</span></div>`;
+        }
+        Object.keys(kps).forEach(kp => {
+          html += `<div class="cat-sub"><div class="cat-sub-name" title="${escapeHtml(kp)}">${escapeHtml(kp)}</div><div class="cat-nums">`;
+          kps[kp].forEach(q => {
+            const st = states[q.id] || 'unstudied';
+            html += `<span class="qnum ${st}" data-id="${q.id}" onclick="selectQ(${q.id})">${q.id}</span>`;
+          });
+          html += `</div></div>`;
+        });
+      });
+    }
+
     html += `</div>`;
     container.insertAdjacentHTML('beforeend', html);
   });
