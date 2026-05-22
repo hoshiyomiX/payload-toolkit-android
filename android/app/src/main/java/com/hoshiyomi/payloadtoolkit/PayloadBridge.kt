@@ -48,7 +48,7 @@ object PayloadBridge {
         "none" to Triple(0, 0, 0),
         "gzip" to Triple(1, 9, 6),
         "bzip2" to Triple(1, 9, 9),
-        "xz" to Triple(0, 9, 6),
+        "xz" to Triple(0, 6, 6),     // 7-9 are impractically slow on mobile
         "brotli" to Triple(0, 11, 6)
     )
 

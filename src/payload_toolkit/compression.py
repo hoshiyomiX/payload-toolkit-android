@@ -153,6 +153,132 @@ def compress(data, algorithm="gzip", level=None):
     raise ValueError(f"Unknown compression algorithm: {algorithm!r}")
 
 
+def compress_streaming(data, algorithm="gzip", level=None, chunk_size=1 << 20,
+                       on_progress=None):
+    """Compress *data* in chunks, reporting progress via *on_progress* callback.
+
+    Unlike :func:`compress` which is a single blocking call, this function feeds
+    data to an incremental compressor in chunks of *chunk_size* bytes, calling
+    *on_progress(bytes_compressed, total_bytes)* after each chunk.
+
+    This is critical on Android where compressing 2+ GB partitions with xz-9
+    can take 30-60+ minutes — without progress, the user sees a frozen UI.
+
+    Parameters
+    ----------
+    data : bytes
+        Raw data to compress.
+    algorithm : str
+        Compression algorithm name (same as :func:`compress`).
+    level : int or None
+        Compression level (same as :func:`compress`).
+    chunk_size : int
+        Size of each chunk fed to the compressor (default 1 MB).
+    on_progress : callable(bytes_done, total_bytes) or None
+        Progress callback invoked after each chunk.
+
+    Returns
+    -------
+    bytes
+        Compressed data.
+    """
+    if not isinstance(data, bytes):
+        data = bytes(data)
+
+    alg = _normalise(algorithm)
+    total = len(data)
+
+    if alg == ALG_NONE:
+        # Still report progress for consistency (fast path)
+        if on_progress:
+            on_progress(total, total)
+        return data
+
+    # Resolve level
+    if level is None:
+        level = DEFAULT_LEVELS.get(alg)
+    rng = LEVEL_RANGES.get(alg, (0, 0))
+    level = max(rng[0], min(rng[1], int(level)))
+
+    done = 0
+    result_parts = []
+
+    def _progress():
+        if on_progress:
+            on_progress(done, total)
+
+    # -- Bzip2: incremental via bz2.BZ2Compressor --
+    if alg == ALG_BZIP2:
+        comp = bz2.BZ2Compressor(compresslevel=level)
+        offset = 0
+        while offset < total:
+            chunk = data[offset:offset + chunk_size]
+            result_parts.append(comp.compress(chunk))
+            offset += len(chunk)
+            done = offset
+            _progress()
+        result_parts.append(comp.flush())
+        return b"".join(result_parts)
+
+    # -- Gzip: incremental via gzip.GzipFile writing chunk by chunk --
+    if alg == ALG_GZIP:
+        buf = io.BytesIO()
+        with gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=level,
+                           mtime=0) as f:
+            offset = 0
+            while offset < total:
+                f.write(data[offset:offset + chunk_size])
+                offset += chunk_size
+                done = min(offset, total)
+                _progress()
+        return buf.getvalue()
+
+    # -- XZ: incremental via lzma.LZMACompressor --
+    if alg == ALG_XZ:
+        if not _HAS_LZMA:
+            raise RuntimeError(
+                "XZ compression requires the 'lzma' module (liblzma).  "
+                "On Termux: pkg install python  (includes liblzma).  "
+                "On Linux: apt install liblzma-dev && reinstall Python."
+            )
+        # Use larger chunks for xz since LZMACompressor has internal
+        # dictionary sizes; 4 MB chunks give better throughput.
+        xz_chunk = max(chunk_size, 4 << 20)
+        comp = _lzma_mod.LZMACompressor(
+            format=_lzma_mod.FORMAT_XZ,
+            preset=level,
+        )
+        offset = 0
+        while offset < total:
+            chunk = data[offset:offset + xz_chunk]
+            result_parts.append(comp.compress(chunk))
+            offset += len(chunk)
+            done = offset
+            _progress()
+        result_parts.append(comp.flush())
+        return b"".join(result_parts)
+
+    # -- Brotli: incremental via brotli.Compressor --
+    if alg == ALG_BROTLI:
+        if not _HAS_BROTLI:
+            raise RuntimeError(
+                "brotli compression requires the 'brotli' Python package.  "
+                "Install it via pip:  pip install brotli"
+            )
+        comp = _brotli_mod.Compressor(quality=level)
+        offset = 0
+        while offset < total:
+            chunk = data[offset:offset + chunk_size]
+            result_parts.append(comp.process(chunk))
+            offset += len(chunk)
+            done = offset
+            _progress()
+        result_parts.append(comp.finish())
+        return b"".join(result_parts)
+
+    raise ValueError(f"Unknown compression algorithm: {algorithm!r}")
+
+
 def decompress(data, algorithm="auto"):
     """Decompress *data*.
 

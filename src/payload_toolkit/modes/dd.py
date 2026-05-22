@@ -33,7 +33,7 @@ import time
 import zipfile
 
 from .. import _report_progress
-from ..compression import compress, DEFAULT_LEVELS
+from ..compression import compress, compress_streaming, DEFAULT_LEVELS
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -669,6 +669,11 @@ def run(*args, **kwargs):
         lines.append(f"[Step 1] Building ddbundle.bin...")
         lines.append(f"  Compressing {num_parts} partition(s) with {compress_name}{level_display}...")
 
+        # Warn about high compression levels on mobile
+        if compress_alg in ("xz", "brotli") and level and level >= 7:
+            lines.append(f"  [!] WARNING: {compress_name} level {level} is very slow on Android.")
+            lines.append(f"      Level 6 is recommended for a good size/speed balance.")
+
         header = _build_header(compress_id, num_parts)
 
         partitions_meta = []
@@ -695,7 +700,17 @@ def run(*args, **kwargs):
             if compress_id == 0:
                 comp_data = raw_data
             else:
-                comp_data = compress(raw_data, compress_alg, level=level)
+                # Use streaming compression for progress reporting.
+                # Without this, xz-9 on large partitions shows no progress
+                # for 30-60+ minutes on mobile.
+                comp_data = compress_streaming(
+                    raw_data, compress_alg, level=level,
+                    on_progress=lambda done, tot, _n=name: _report_progress(
+                        1 + i + done / max(tot, 1),
+                        2 + num_parts,
+                        f"Compressing {_n} {done / max(tot, 1) * 100:.0f}%"
+                    )
+                )
             del raw_data  # free raw data after compression
 
             comp_size = len(comp_data)

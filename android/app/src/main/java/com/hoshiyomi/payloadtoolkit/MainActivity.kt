@@ -337,7 +337,7 @@ class MainActivity : AppCompatActivity() {
         "none" to Pair(0, 0),     // no levels for none
         "gzip" to Pair(1, 9),
         "bzip2" to Pair(1, 9),
-        "xz" to Pair(0, 9)
+        "xz" to Pair(0, 6)   // 7-9 are impractically slow on mobile (30-60+ min for large partitions)
     )
 
     private fun setupCompressionLevelSpinner() {
