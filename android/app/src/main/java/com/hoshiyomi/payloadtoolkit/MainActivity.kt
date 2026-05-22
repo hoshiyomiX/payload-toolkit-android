@@ -678,7 +678,6 @@ class MainActivity : AppCompatActivity() {
         showLog("Device: $deviceValue\n", LogLevel.INFO)
         showLog("Output file: $outputFileName\n", LogLevel.INFO)
         showLog("Output path: $outPath\n\n", LogLevel.INFO)
-        showLog("[INFO] Foreground service started — app is protected from kill\n", LogLevel.INFO)
 
         // Store output path for result handler
         _lastOutputPath = outPath
@@ -696,17 +695,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         try {
-            if (Build.VERSION.SDK.SDK_INT >= Build.VERSION_CODES.O) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(serviceIntent)
             } else {
                 startService(serviceIntent)
             }
+            showLog("[INFO] Foreground service started — app is protected from kill\n", LogLevel.INFO)
         } catch (e: Exception) {
             // Foreground service failed (e.g. Samsung OneUI, MIUI restrictions)
             // Fall back to direct lifecycleScope execution
             showLog("[WARN] Service failed: ${e.message?.take(80)}\n", LogLevel.WARN)
             showLog("[INFO] Falling back to direct execution...\n\n", LogLevel.INFO)
-            serviceIntent = null  // Signal fallback
             lifecycleScope.launch {
                 val result = executeRepack()
                 handleRepackResult(
