@@ -6,7 +6,9 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.Manifest
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.BroadcastReceiver
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -21,6 +23,7 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.hoshiyomi.payloadtoolkit.service.PayloadService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -54,6 +57,7 @@ class MainActivity : AppCompatActivity() {
     private var selectedCompressionLevel: Int = 0  // 0 = default (best)
     private var imageFiles: MutableList<Pair<String, String>> = mutableListOf() // (name, path)
     private var isExecuting = false
+    private var repackReceiver: BroadcastReceiver? = null
 
     // App-internal directories
     private lateinit var inputDir: File
@@ -578,13 +582,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onBackPressed() {
         if (isExecuting) {
-            // Prevent closing app during repack — show confirmation dialog
+            // Foreground service keeps repack alive even if user leaves
             MaterialAlertDialogBuilder(this)
                 .setTitle("Repack in progress")
-                .setMessage("The repack operation is still running. Are you sure you want to close the app? The process will continue in the background.")
-                .setPositiveButton("Close") { _, _ ->
-                    isExecuting = false
-                    super.onBackPressed()
+                .setMessage("The repack operation is running in the background service. " +
+                    "You can safely leave the app — it will continue. " +
+                    "A notification will show progress.")
+                .setPositiveButton("Leave") { _, _ ->
+                    // Don't stop the service — let it run in background
+                    moveTaskToBack(true)
                 }
                 .setNegativeButton("Stay", null)
                 .show()
@@ -642,63 +648,107 @@ class MainActivity : AppCompatActivity() {
         // Store output path for result handler
         _lastOutputPath = outPath
 
-        // Execute repack directly via lifecycleScope
+        // Execute repack via foreground service (survives minimize, screen off, OOM)
         isExecuting = true
         setUIExecuting(true)
         showLog("[INFO] Starting repack operation...\n", LogLevel.INFO)
-        lifecycleScope.launch {
-            val result = executeRepack(
-                imagesParam = images,
-                deviceParam = deviceValue,
-                outputPathParam = outPath
-            )
-            handleRepackResult(
-                success = result.success,
-                output = result.output,
-                error = result.error,
-                durationMs = result.durationMs
-            )
-            isExecuting = false
-            setUIExecuting(false)
-        }
+        startRepackService(images, deviceValue, outPath)
     }
 
     private var _lastOutputPath: String = ""
 
     /**
-     * Execute repack directly via lifecycleScope.
-     * Accepts pre-computed parameters from onRepackClicked() to avoid
-     * re-reading UI state from a background coroutine.
+     * Start the foreground service for repack.
+     * The service holds a WakeLock, shows a notification with progress,
+     * and broadcasts results back to this Activity.
      */
-    private suspend fun executeRepack(
-        imagesParam: Map<String, String> = imageFiles.toMap(),
-        deviceParam: String = "generic",
-        outputPathParam: String = ""
-    ): PayloadResult {
-        if (imagesParam.isEmpty()) {
-            return PayloadResult.error("No partition images added. Use 'Add Images' button.")
+    private fun startRepackService(
+        images: Map<String, String>,
+        device: String,
+        outputPath: String
+    ) {
+        // Request notification permission for Android 13+
+        requestNotificationIfNeeded()
+
+        val serviceIntent = Intent(this, PayloadService::class.java).apply {
+            @Suppress("DEPRECATION")
+            putExtra("images", HashMap(images))
+            putExtra("device", device)
+            putExtra("compression", selectedCompression)
+            putExtra("level", selectedCompressionLevel)
+            putExtra("output_path", outputPath)
         }
 
-        val outPath = if (outputPathParam.isNotBlank()) outputPathParam else {
-            val outDir = outputDirPath ?: outputDir.absolutePath
-            File(outDir).mkdirs()
-            val customName = prefs.getString("pref_custom_filename", "")?.trim()
-            val outputFileName = if (!customName.isNullOrEmpty()) {
-                if (customName.lowercase().endsWith(".zip")) customName else "$customName.zip"
-            } else {
-                PayloadBridge.buildOutputFileName(imagesParam, selectedCompression)
+        try {
+            startForegroundService(serviceIntent)
+            registerRepackReceiver()
+        } catch (e: Exception) {
+            // Foreground service failed — fall back to lifecycleScope
+            showLog("[WARN] Service start failed, using direct execution\n", LogLevel.WARN)
+            lifecycleScope.launch {
+                val result = executeRepackDirect(images, device, outputPath)
+                handleRepackResult(
+                    success = result.success,
+                    output = result.output,
+                    error = result.error,
+                    durationMs = result.durationMs
+                )
+                isExecuting = false
+                setUIExecuting(false)
             }
-            File(outDir, outputFileName).absolutePath
         }
+    }
 
+    /**
+     * Register BroadcastReceiver for service progress + result broadcasts.
+     */
+    private fun registerRepackReceiver() {
+        repackReceiver?.let { unregisterReceiver(it) }
+        repackReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                when (intent.action) {
+                    PayloadService.ACTION_REPACK_PROGRESS -> {
+                        val percent = intent.getIntExtra(PayloadService.EXTRA_PROGRESS_PERCENT, 0)
+                        val message = intent.getStringExtra(PayloadService.EXTRA_PROGRESS_MESSAGE) ?: ""
+                        val progressBar = findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.progressBar)
+                        if (progressBar != null) {
+                            progressBar.isIndeterminate = false
+                            progressBar.progress = percent
+                        }
+                    }
+                    PayloadService.ACTION_REPACK_RESULT -> {
+                        val success = intent.getBooleanExtra(PayloadService.EXTRA_SUCCESS, false)
+                        val output = intent.getStringExtra(PayloadService.EXTRA_OUTPUT) ?: ""
+                        val error = intent.getStringExtra(PayloadService.EXTRA_ERROR) ?: ""
+                        val duration = intent.getLongExtra(PayloadService.EXTRA_DURATION_MS, 0)
+                        unregisterReceiverSafe()
+                        handleRepackResult(success, output, error, duration)
+                    }
+                }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(PayloadService.ACTION_REPACK_PROGRESS)
+            addAction(PayloadService.ACTION_REPACK_RESULT)
+        }
+        registerReceiver(repackReceiver, filter)
+    }
+
+    /**
+     * Fallback: execute repack directly in lifecycleScope (used only if service fails).
+     */
+    private suspend fun executeRepackDirect(
+        imagesParam: Map<String, String>,
+        deviceParam: String,
+        outputPath: String
+    ): PayloadResult {
         return PayloadBridge.dd(
             images = imagesParam,
             device = deviceParam,
             compression = selectedCompression,
             level = selectedCompressionLevel,
-            outputPath = outPath,
+            outputPath = outputPath,
             onProgress = { progress ->
-                // Update progress bar directly from coroutine
                 runOnUiThread {
                     val progressBar = findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.progressBar)
                     if (progressBar != null) {
@@ -708,6 +758,23 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         )
+    }
+
+    private fun unregisterReceiverSafe() {
+        try {
+            repackReceiver?.let { unregisterReceiver(it) }
+        } catch (_: Exception) { /* already unregistered */ }
+        repackReceiver = null
+    }
+
+    private fun requestNotificationIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
+            }
+        }
     }
 
     /**
@@ -784,6 +851,23 @@ class MainActivity : AppCompatActivity() {
                 file.delete()
             }
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Lifecycle
+    // ═══════════════════════════════════════════════════════════════
+
+    override fun onResume() {
+        super.onResume()
+        // If service was running while we were in background, re-register receiver
+        if (isExecuting) {
+            registerRepackReceiver()
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        unregisterReceiverSafe()
     }
 
     private fun setUIExecuting(executing: Boolean) {
