@@ -255,3 +255,20 @@ Android 16 notes:
 - App targets SDK 34, runs in backward-compat mode on Android 16
 - FOERGROUND_SERVICE_SPECIAL_USE + RECEIVER_NOT_EXPORTED already handled
 - No Android 16-specific crashes expected at targetSdk 34
+
+---
+last_phase: DELIVER
+task: Fix CI build failure — missing DocumentsContract import
+complexity: Simple
+task_type: Coding
+files_modified: MainActivity.kt
+next_step: IDLE - verify CI green
+
+Work Log:
+- Invoked Stellar Frameworks v5.11.0, followed protocol (SSV PASS)
+- Fetched CI logs for run 26317760856: Kotlin CompilationErrorException
+- Root cause: 'Unresolved reference: DocumentsContract' at MainActivity.kt:494:29
+  - Line 494 uses DocumentsContract.getTreeDocumentId(uri) for SAF tree URI resolution
+  - Import android.provider.DocumentsContract was never added
+- Fixed: Added import android.provider.DocumentsContract (alphabetically before Settings)
+- Committed as cbae8ae, pushed (d189cfa..cbae8ae)
