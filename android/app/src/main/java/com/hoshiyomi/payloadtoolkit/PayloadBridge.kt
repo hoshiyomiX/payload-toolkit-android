@@ -1,5 +1,6 @@
 package com.hoshiyomi.payloadtoolkit
 
+import android.os.Process
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -60,6 +61,13 @@ object PayloadBridge {
      */
     private suspend fun executePyz(args: List<String>, onProgress: ((ProgressUpdate) -> Unit)? = null, onOutputLine: ((String) -> Unit)? = null): PayloadResult {
         return withContext(Dispatchers.IO) {
+            // Boost thread priority for CPU-intensive repack operations.
+            // THREAD_PRIORITY_DEFAULT=0, negative = higher priority.
+            // -10 gives ~80% CPU allocation (substantial boost over default).
+            try {
+                Process.setThreadPriority(Process.myTid(), -10)
+            } catch (_: Exception) {}
+
             val execResult = PythonBridge.executePyz(args, onProgress, onOutputLine)
 
             if (execResult.success) {

@@ -782,19 +782,29 @@ object PythonBridge {
     /**
      * Parse a single stdout line for __PROGRESS__ marker.
      * @return true if the line was a progress marker (stripped from output), false otherwise.
+     *
+     * Marker format: __PROGRESS__<current>/<total>/<message>[/<percent>]
+     * When the optional 4th field (percent) is present, it is used directly
+     * instead of computing from current/total, giving accurate sub-step
+     * compression percentage.
      */
     private fun parseProgressLine(line: String, onProgress: ((ProgressUpdate) -> Unit)?): Boolean {
         val idx = line.indexOf(PROGRESS_MARKER)
         if (idx < 0) return false
 
         val payload = line.substring(idx + PROGRESS_MARKER.length)
-        val parts = payload.split("/", limit = 3)
+        val parts = payload.split("/", limit = 4)
         if (parts.size >= 2) {
             val current = parts[0].toIntOrNull() ?: return false
             val total = parts[1].toIntOrNull() ?: return false
             val message = if (parts.size >= 3) parts[2].replace("_", " ") else ""
-            val percent = if (total > 0) (current * 100 / total) else 0
-            onProgress?.invoke(ProgressUpdate(current, total, message, percent))
+            // Use explicit percent from 4th field if available, otherwise compute from current/total
+            val percent = if (parts.size >= 4) {
+                parts[3].toIntOrNull() ?: if (total > 0) current * 100 / total else 0
+            } else {
+                if (total > 0) current * 100 / total else 0
+            }
+            onProgress?.invoke(ProgressUpdate(current, total, message, percent.coerceIn(0, 100)))
             return true  // Strip this line from output
         }
         return false
@@ -807,13 +817,17 @@ object PythonBridge {
             val idx = line.indexOf(PROGRESS_MARKER)
             if (idx < 0) continue
             val payload = line.substring(idx + PROGRESS_MARKER.length)
-            val parts = payload.split("/", limit = 3)
+            val parts = payload.split("/", limit = 4)
             if (parts.size >= 2) {
                 val current = parts[0].toIntOrNull() ?: continue
                 val total = parts[1].toIntOrNull() ?: continue
                 val message = if (parts.size >= 3) parts[2].replace("_", " ") else ""
-                val percent = if (total > 0) (current * 100 / total) else 0
-                lastProgress = ProgressUpdate(current, total, message, percent)
+                val percent = if (parts.size >= 4) {
+                    parts[3].toIntOrNull() ?: if (total > 0) current * 100 / total else 0
+                } else {
+                    if (total > 0) current * 100 / total else 0
+                }
+                lastProgress = ProgressUpdate(current, total, message, percent.coerceIn(0, 100))
             }
         }
         // Emit the last known progress as final state
