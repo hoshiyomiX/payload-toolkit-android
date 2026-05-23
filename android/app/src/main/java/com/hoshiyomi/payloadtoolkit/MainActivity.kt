@@ -25,6 +25,9 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import java.lang.ref.WeakReference
 import java.io.File
 import java.io.FileOutputStream
 import androidx.core.content.edit
@@ -55,7 +58,24 @@ class MainActivity : AppCompatActivity() {
     private var selectedCompressionLevel: Int = 0  // 0 = default (best)
     private var imageFiles: MutableList<Pair<String, String>> = mutableListOf() // (name, path)
     private var isExecuting = false
-    private var repackWakeLock: PowerManager.WakeLock? = null
+    companion object {
+        // Application-scoped coroutine scope for long-running repack operations.
+        // Survives Activity destruction when the user minimizes the app.
+        private val repackScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+        // Whether a repack is currently running (survives Activity recreation)
+        @Volatile var isRepacking = false
+            private set
+
+        // Weak reference to the current Activity for safe UI updates from coroutine
+        @Volatile private var activityRef: WeakReference<MainActivity>? = null
+
+        // WakeLock (survives Activity recreation)
+        @Volatile private var wakeLock: PowerManager.WakeLock? = null
+
+        // Latest output path (survives Activity recreation)
+        @Volatile private var lastOutputPath: String = ""
+    }
 
     // App-internal directories
     private lateinit var inputDir: File
@@ -582,8 +602,8 @@ class MainActivity : AppCompatActivity() {
         if (isExecuting) {
             MaterialAlertDialogBuilder(this)
                 .setTitle("Repack in progress")
-                .setMessage("The repack operation is still running. " +
-                    "Keep the app in the foreground to avoid interruption.")
+                .setMessage("The repack operation is running in the background " +
+                    "and will continue even if you leave the app.")
                 .setPositiveButton("Stay", null)
                 .show()
         } else {
@@ -592,7 +612,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onRepackClicked() {
-        if (isExecuting) {
+        if (isRepacking) {
             showLog("Operation already in progress. Please wait.\n", LogLevel.WARN)
             return
         }
@@ -637,81 +657,81 @@ class MainActivity : AppCompatActivity() {
         showLog("Output file: $outputFileName\n", LogLevel.INFO)
         showLog("Output path: $outPath\n\n", LogLevel.INFO)
 
-        // Store output path for result handler
-        _lastOutputPath = outPath
-
-        // Execute repack directly in lifecycleScope with WakeLock
+        // Store state in companion object (survives Activity recreation)
+        lastOutputPath = outPath
+        isRepacking = true
         isExecuting = true
         setUIExecuting(true)
         showLog("[INFO] Starting repack operation...\n", LogLevel.INFO)
-        lifecycleScope.launch {
+
+        // Execute in application-scoped scope (survives Activity destruction)
+        repackScope.launch {
             try {
-                acquireRepackWakeLock()
-                val result = executeRepack(images, deviceValue, outPath)
-                handleRepackResult(
-                    success = result.success,
-                    output = result.output,
-                    error = result.error,
-                    durationMs = result.durationMs
-                )
-            } catch (e: Exception) {
-                showLog("[ERROR] Repack failed: ${e.message}\n", LogLevel.ERROR)
-                showLog("[INFO] Check logcat for details.\n", LogLevel.WARN)
-            } finally {
-                releaseRepackWakeLock()
-                isExecuting = false
-                setUIExecuting(false)
-            }
-        }
-    }
-
-    private var _lastOutputPath: String = ""
-
-    /**
-     * Execute repack directly in lifecycleScope.
-     * Uses WakeLock to prevent CPU sleep during heavy I/O.
-     */
-    private suspend fun executeRepack(
-        imagesParam: Map<String, String>,
-        deviceParam: String,
-        outputPath: String
-    ): PayloadResult {
-        return PayloadBridge.dd(
-            images = imagesParam,
-            device = deviceParam,
-            compression = selectedCompression,
-            level = selectedCompressionLevel,
-            outputPath = outputPath,
-            onProgress = { progress ->
-                runOnUiThread {
-                    val progressBar = findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.progressBar)
-                    if (progressBar != null) {
-                        progressBar.isIndeterminate = false
-                        progressBar.progress = progress.percent
+                // Acquire WakeLock with application context
+                val act = activityRef?.get()
+                if (act != null) {
+                    val pm = act.applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager
+                    wakeLock = pm.newWakeLock(
+                        PowerManager.PARTIAL_WAKE_LOCK,
+                        "PayloadToolkit::RepackWakeLock"
+                    ).apply {
+                        setReferenceCounted(false)
+                        acquire(30 * 60 * 1000L)
                     }
                 }
+
+                val result = PayloadBridge.dd(
+                    images = images,
+                    device = deviceValue,
+                    compression = selectedCompression,
+                    level = selectedCompressionLevel,
+                    outputPath = outPath,
+                    onProgress = { progress ->
+                        // Safe UI update — uses current Activity reference
+                        val current = activityRef?.get()
+                        if (current != null && !current.isFinishing && !current.isDestroyed) {
+                            current.runOnUiThread {
+                                val bar = current.findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.progressBar)
+                                if (bar != null) {
+                                    bar.isIndeterminate = false
+                                    bar.progress = progress.percent
+                                }
+                            }
+                        }
+                    }
+                )
+
+                // Handle result on current Activity instance
+                val current = activityRef?.get()
+                if (current != null && !current.isFinishing && !current.isDestroyed) {
+                    current.handleRepackResult(
+                        success = result.success,
+                        output = result.output,
+                        error = result.error,
+                        durationMs = result.durationMs
+                    )
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e  // Don't swallow coroutine cancellation
+            } catch (e: Exception) {
+                val current = activityRef?.get()
+                if (current != null && !current.isFinishing && !current.isDestroyed) {
+                    current.showLog("[ERROR] Repack failed: ${e.message}\n", LogLevel.ERROR)
+                    current.showLog("[INFO] Check logcat for details.\n", LogLevel.WARN)
+                }
+            } finally {
+                // Release WakeLock
+                try { wakeLock?.release() } catch (_: Exception) {}
+                wakeLock = null
+                isRepacking = false
+
+                val current = activityRef?.get()
+                if (current != null && !current.isFinishing && !current.isDestroyed) {
+                    current.isExecuting = false
+                    current.setUIExecuting(false)
+                }
             }
-        )
-    }
-
-    /**
-     * Acquire WakeLock to prevent CPU sleep during heavy compression I/O.
-     * 30-minute safety timeout as backstop.
-     */
-    private fun acquireRepackWakeLock() {
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        repackWakeLock = pm.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "PayloadToolkit::RepackWakeLock"
-        ).apply {
-            setReferenceCounted(false)
-            acquire(30 * 60 * 1000L)
         }
-    }
-
-    private fun releaseRepackWakeLock() {
-        try { repackWakeLock?.release() } catch (_: Exception) { /* already released */ }
-        repackWakeLock = null
     }
 
     /**
@@ -725,7 +745,7 @@ class MainActivity : AppCompatActivity() {
         if (success) {
             showLog("Completed in ${durationMs}ms\n", LogLevel.SUCCESS)
             if (output.isNotBlank()) showLog(output)
-            showLog("Output: ${_lastOutputPath}\n", LogLevel.INFO)
+            showLog("Output: $lastOutputPath\n", LogLevel.INFO)
         } else {
             showLog("Failed in ${durationMs}ms\n", LogLevel.ERROR)
             showLog("Error: $error\n", LogLevel.ERROR)
@@ -796,11 +816,22 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        activityRef = WeakReference(this)
+        // Reconnect UI if repack is still running (e.g. returned from background)
+        if (isRepacking) {
+            isExecuting = true
+            setUIExecuting(true)
+            showLog("[INFO] Repack in progress (returned from background)\n", LogLevel.INFO)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        activityRef = null
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        releaseRepackWakeLock()
     }
 
     private fun setUIExecuting(executing: Boolean) {
