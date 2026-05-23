@@ -675,7 +675,7 @@ def run(*args, **kwargs):
         lines.append("")
 
         # ── Step 1: Build ddbundle.bin ──
-        _report_progress(1, total_steps, "Building ddbundle.bin")
+        _report_progress(1, total_steps, "Building ddbundle.bin", percent=0)
         lines.append(f"[Step 1] Building ddbundle.bin...")
         lines.append(f"  Compressing {num_parts} partition(s) with {compress_name}{level_display}...")
 
@@ -690,7 +690,7 @@ def run(*args, **kwargs):
         data_blobs = bytearray()
 
         for i, (name, path) in enumerate(images.items()):
-            _report_progress(1 + i, total_steps, f"Compressing {name}")
+            _report_progress(1 + i, total_steps, f"Compressing {name}", percent=0)
 
             # Stream-read file: hash while reading to avoid double pass
             sha = hashlib.sha256()
@@ -719,7 +719,7 @@ def run(*args, **kwargs):
                         1 + _i + done / max(tot, 1),
                         _np,
                         f"Compressing {_n} {done / max(tot, 1) * 100:.0f}%",
-                        percent=int((1 + _i + done / max(tot, 1)) / _np * 100)
+                        percent=int(done / max(tot, 1) * 100)
                     )
                 )
             del raw_data  # free raw data after compression
@@ -751,7 +751,7 @@ def run(*args, **kwargs):
         lines.append("")
 
         # ── Step 2: Build flasher scripts ──
-        _report_progress(1 + num_parts, total_steps, "Building flasher scripts")
+        _report_progress(1 + num_parts, total_steps, "Building flasher scripts", percent=0)
         lines.append("[Step 2] Building flasher scripts...")
 
         update_binary = _build_update_script(
@@ -769,7 +769,7 @@ def run(*args, **kwargs):
         lines.append("")
 
         # ── Step 3: Write output ZIP ──
-        _report_progress(2 + num_parts, total_steps, "Writing output ZIP")
+        _report_progress(2 + num_parts, total_steps, "Writing output ZIP", percent=0)
         lines.append(f"[Step 3] Writing {os.path.basename(output_path)}...")
 
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
