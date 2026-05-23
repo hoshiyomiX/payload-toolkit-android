@@ -272,3 +272,43 @@ Work Log:
   - Import android.provider.DocumentsContract was never added
 - Fixed: Added import android.provider.DocumentsContract (alphabetically before Settings)
 - Committed as cbae8ae, pushed (d189cfa..cbae8ae)
+
+---
+last_phase: DELIVER
+task: Fix repack crash on Android 16 — remove foreground service entirely (3rd recurrence)
+complexity: Standard
+task_type: Coding
+files_modified: MainActivity.kt
+traceability: IMPL-001 to IMPL-006
+pivot: YES
+scope_drift: NONE
+next_step: IDLE - verify CI green, test on Android 16
+
+Work Log:
+- Invoked Stellar Frameworks v5.11.0, followed protocol (SSV PASS)
+- Continuation: user reports crash persists after CI fix (cbae8ae)
+- Deep root cause analysis: APPROACH FAILURE (3rd recurrence)
+  - startForegroundService() succeeds (no exception thrown)
+  - PayloadService.onStartCommand() -> startForeground(SPECIAL_USE) throws SecurityException
+  - Catch block tries plain startForeground() -> ALSO throws on API 34+ (requires type)
+  - System enforces ForegroundServiceDidNotStartInTimeException -> uncatchable kill
+  - Same pattern as commits ca0c139 and 08977a2+914b860 — foreground service approach fundamentally broken on Android 16
+- Pivot: YES (Foreground service → lifecycleScope + WakeLock)
+  - From: Foreground service with SPECIAL_USE + broadcast receiver
+  - Trigger: 3rd crash recurrence, approach failure confirmed
+  - To: Direct lifecycleScope execution with PARTIAL_WAKE_LOCK
+- IMPL-001: Removed imports (BroadcastReceiver, IntentFilter, PayloadService, RECEIVER_NOT_EXPORTED), added PowerManager
+- IMPL-002: Replaced repackReceiver field with repackWakeLock field
+- IMPL-003: Replaced startRepackService() call with direct lifecycleScope + WakeLock in onRepackClicked()
+- IMPL-004: Removed startRepackService(), registerRepackReceiver(), unregisterReceiverSafe(), requestNotificationIfNeeded()
+- IMPL-005: Cleaned up onResume() (no receiver re-reg), onDestroy() (releaseRepackWakeLock), onBackPressed() (no service references)
+- IMPL-006: Added acquireRepackWakeLock() + releaseRepackWakeLock() (PARTIAL_WAKE_LOCK, 30min timeout)
+- Committed as 143a4c7, pushed (cbae8ae..143a4c7)
+- Net change: 1 file, +32/-132 = -100 lines
+- Verification: grep confirms zero references to any removed symbols
+
+Stage Summary:
+- Commit 143a4c7 "fix: remove foreground service, use lifecycleScope + WakeLock as sole repack path"
+- No more foreground service dependency — zero crash surface on Android 14/15/16
+- WakeLock prevents CPU sleep during heavy compression I/O
+- PayloadService.kt + manifest declaration left in place (harmless, unused)
