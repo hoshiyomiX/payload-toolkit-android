@@ -75,10 +75,6 @@ class MainActivity : AppCompatActivity() {
 
         // Latest output path (survives Activity recreation)
         @Volatile private var lastOutputPath: String = ""
-
-        // File size monitor job — polls output file size to confirm repack is alive
-        private var monitorJob: kotlinx.coroutines.Job? = null
-        @Volatile private var lastSeenSize: Long = -1L
     }
 
     // App-internal directories
@@ -668,9 +664,6 @@ class MainActivity : AppCompatActivity() {
         setUIExecuting(true)
         showLog("[INFO] Starting repack operation...\n", LogLevel.INFO)
 
-        // Start file size monitor (polls output file every 2s)
-        startFileMonitor(outPath)
-
         // Execute in application-scoped scope (survives Activity destruction)
         repackScope.launch {
             try {
@@ -705,6 +698,13 @@ class MainActivity : AppCompatActivity() {
                                 }
                             }
                         }
+                    },
+                    onOutputLine = { line ->
+                        // Stream Python stdout to log in real-time
+                        val current = activityRef?.get()
+                        if (current != null && !current.isFinishing && !current.isDestroyed) {
+                            current.showLog("$line\n")
+                        }
                     }
                 )
 
@@ -727,9 +727,6 @@ class MainActivity : AppCompatActivity() {
                     current.showLog("[INFO] Check logcat for details.\n", LogLevel.WARN)
                 }
             } finally {
-                // Stop file size monitor
-                stopFileMonitor()
-
                 // Release WakeLock
                 try { wakeLock?.release() } catch (_: Exception) {}
                 wakeLock = null
@@ -745,57 +742,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Start polling the output file size to confirm repack is still alive.
-     * Logs size changes every 2 seconds so user can see progress even after
-     * returning from background.
-     */
-    private fun startFileMonitor(outputPath: String) {
-        stopFileMonitor() // Cancel any previous monitor
-        lastSeenSize = -1L
-        monitorJob = repackScope.launch {
-            while (true) {
-                kotlinx.coroutines.delay(2000) // Poll every 2 seconds
-                if (!isRepacking) break
-
-                val f = File(outputPath)
-                if (f.exists() && f.length() > 0) {
-                    val size = f.length()
-                    // Only log when size actually changed (file is growing = process alive)
-                    if (size != lastSeenSize) {
-                        lastSeenSize = size
-                        val current = activityRef?.get()
-                        if (current != null && !current.isFinishing && !current.isDestroyed) {
-                            current.showLog("  Writing: ${formatFileSize(size)}\n", LogLevel.INFO)
-                        }
-                    }
-                } else {
-                    // Output file doesn't exist yet — check if ddbundle.bin is growing
-                    val parentDir = File(outputPath).parentFile
-                    if (parentDir != null) {
-                        val bundle = File(parentDir, "ddbundle.bin")
-                        if (bundle.exists() && bundle.length() > 0) {
-                            val size = bundle.length()
-                            if (size != lastSeenSize) {
-                                lastSeenSize = size
-                                val current = activityRef?.get()
-                                if (current != null && !current.isFinishing && !current.isDestroyed) {
-                                    current.showLog("  Compressing: ${formatFileSize(size)}\n", LogLevel.INFO)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private fun stopFileMonitor() {
-        monitorJob?.cancel()
-        monitorJob = null
-        lastSeenSize = -1L
-    }
-
-    /**
      * Handle repack result — updates UI with success/failure status.
      */
     private fun handleRepackResult(success: Boolean, output: String, error: String?, durationMs: Long) {
@@ -805,12 +751,10 @@ class MainActivity : AppCompatActivity() {
         showLog("\n" + "\u2550".repeat(50) + "\n")
         if (success) {
             showLog("Completed in ${durationMs}ms\n", LogLevel.SUCCESS)
-            if (output.isNotBlank()) showLog(output)
             showLog("Output: $lastOutputPath\n", LogLevel.INFO)
         } else {
             showLog("Failed in ${durationMs}ms\n", LogLevel.ERROR)
             showLog("Error: $error\n", LogLevel.ERROR)
-            if (output.isNotBlank()) showLog(output)
         }
         showLog("\u2550".repeat(50) + "\n\n")
         showLog("[INFO] Repack finished\n", LogLevel.INFO)
@@ -883,14 +827,6 @@ class MainActivity : AppCompatActivity() {
             isExecuting = true
             setUIExecuting(true)
             showLog("[INFO] Repack in progress (returned from background)\n", LogLevel.INFO)
-            // Re-emit current file size so user sees activity
-            val path = lastOutputPath
-            if (path.isNotEmpty()) {
-                val f = File(path)
-                if (f.exists()) {
-                    showLog("  Output size: ${formatFileSize(f.length())}\n", LogLevel.INFO)
-                }
-            }
         }
     }
 

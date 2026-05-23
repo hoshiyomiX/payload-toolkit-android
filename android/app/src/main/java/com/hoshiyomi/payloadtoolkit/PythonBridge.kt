@@ -683,20 +683,28 @@ object PythonBridge {
      *                   parsed from stdout. Only effective in exec mode (JNI returns
      *                   output after completion, progress is parsed retroactively).
      */
-    fun executePyz(args: List<String>, onProgress: ((ProgressUpdate) -> Unit)? = null): ExecResult {
+    fun executePyz(
+        args: List<String>,
+        onProgress: ((ProgressUpdate) -> Unit)? = null,
+        onOutputLine: ((String) -> Unit)? = null
+    ): ExecResult {
         val pyz = pyzPath ?: return ExecResult("", ".pyz not found", -1, 0)
 
         // JNI mode: run Python in-process via dlopen
         if (useJniMode && pyBridge != null && nativeLibDir != null && stdlibDir != null) {
-            return executeViaJni(pyz, args, onProgress)
+            return executeViaJni(pyz, args, onProgress, onOutputLine)
         }
 
         // Exec mode: run Python as subprocess (streaming for progress)
         val py = pythonPath ?: return ExecResult("", "Python not initialized", -1, 0)
-        return executeViaExec(py, pyz, args, onProgress)
+        return executeViaExec(py, pyz, args, onProgress, onOutputLine)
     }
 
-    private fun executeViaJni(pyz: String, args: List<String>, onProgress: ((ProgressUpdate) -> Unit)?): ExecResult {
+    private fun executeViaJni(
+        pyz: String, args: List<String>,
+        onProgress: ((ProgressUpdate) -> Unit)?,
+        onOutputLine: ((String) -> Unit)?
+    ): ExecResult {
         val startTime = System.currentTimeMillis()
         Log.d(TAG, "Exec (JNI): $pyz ${args.joinToString(" ")}")
         val result = pyBridge!!.runPython(
@@ -711,15 +719,24 @@ object PythonBridge {
             Log.w(TAG, "JNI exec exit ${result.exitCode}: ${result.output.take(500)}")
         }
 
-        // JNI mode returns all output after completion — parse progress retroactively
+        // JNI mode returns all output after completion — stream retroactively
         if (onProgress != null) {
             parseProgressFromOutput(result.output, onProgress)
+        }
+        if (onOutputLine != null) {
+            for (line in result.output.lines()) {
+                onOutputLine(line)
+            }
         }
 
         return ExecResult(result.output, result.error, result.exitCode, duration)
     }
 
-    private fun executeViaExec(py: String, pyz: String, args: List<String>, onProgress: ((ProgressUpdate) -> Unit)?): ExecResult {
+    private fun executeViaExec(
+        py: String, pyz: String, args: List<String>,
+        onProgress: ((ProgressUpdate) -> Unit)?,
+        onOutputLine: ((String) -> Unit)?
+    ): ExecResult {
         val startTime = System.currentTimeMillis()
         return try {
             val command = mutableListOf(py, pyz)
@@ -729,7 +746,7 @@ object PythonBridge {
             Log.d(TAG, "Exec (exec): ${command.joinToString(" ")}")
             val process = pb.start()
 
-            // Read stdout line-by-line for real-time progress parsing
+            // Read stdout line-by-line — stream in real-time + buffer for result
             val outputLines = mutableListOf<String>()
             val reader = process.inputStream.bufferedReader()
             var line: String?
@@ -737,6 +754,8 @@ object PythonBridge {
                 val raw = line!!
                 if (parseProgressLine(raw, onProgress)) continue
                 outputLines.add(raw)
+                // Stream each line to caller in real-time
+                onOutputLine?.invoke(raw)
             }
 
             val exitCode = process.waitFor()
