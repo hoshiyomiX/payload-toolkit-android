@@ -75,6 +75,9 @@ class MainActivity : AppCompatActivity() {
 
         // Latest output path (survives Activity recreation)
         @Volatile private var lastOutputPath: String = ""
+
+        // Track last progress message to avoid spamming the log with duplicates
+        @Volatile private var lastProgressMessage: String = ""
     }
 
     // App-internal directories
@@ -659,6 +662,7 @@ class MainActivity : AppCompatActivity() {
 
         // Store state in companion object (survives Activity recreation)
         lastOutputPath = outPath
+        lastProgressMessage = ""
         isRepacking = true
         isExecuting = true
         setUIExecuting(true)
@@ -691,11 +695,18 @@ class MainActivity : AppCompatActivity() {
                         val current = activityRef?.get()
                         if (current != null && !current.isFinishing && !current.isDestroyed) {
                             current.runOnUiThread {
+                                // Update progress bar
                                 val bar = current.findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.progressBar)
                                 if (bar != null) {
                                     bar.isIndeterminate = false
                                     bar.progress = progress.percent
                                 }
+                            }
+                            // Log progress message if it changed (avoid log spam)
+                            val msg = "${progress.message} (${progress.percent}%)"
+                            if (msg != lastProgressMessage) {
+                                lastProgressMessage = msg
+                                current.showLog("[PROGRESS] $msg\n", LogLevel.PLAIN)
                             }
                         }
                     },
