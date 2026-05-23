@@ -462,3 +462,48 @@ Stage Summary:
 - User will now see: [PROGRESS] Building ddbundle.bin (33%), [PROGRESS] Compressing product (67%), etc.
 - Progress bar + log both update from the same onProgress callback
 - Dedup: same message won't be logged twice (streaming compression sends many updates)
+
+---
+last_phase: DELIVER
+task: Add notification banner with progress while app is minimized
+complexity: Standard
+task_type: Coding
+files_modified: MainActivity.kt
+traceability: IMPL-001 to IMPL-005
+pivot: NONE
+scope_drift: NONE
+next_step: IDLE - verify CI green, test on Android 16
+
+Work Log:
+- Invoked Stellar Frameworks v5.11.0, followed protocol (SSV PASS)
+- New task: user wants notification banner showing repack progress while minimized
+- SPECIFY: Analyzed previous foreground service crash history (3 recurrences, SecurityException on Android 16)
+- Decision: Use NotificationManager.notify() directly, NO foreground service
+  - Avoids the SecurityException that killed the previous approach
+  - Combined with existing WakeLock, process stays alive during compression
+- IMPL-001: Added notification helper methods to companion object
+  - showProgressNotification(message, percent) — ongoing with determinate progress bar
+  - showCompletionNotification(success, message) — auto-dismissable result
+  - cancelRepackNotification() — cleanup
+  - All methods use appContext (survives Activity destruction)
+  - PendingIntent opens app when notification is tapped
+  - try-catch wraps all notification ops (non-critical UX)
+- IMPL-002: Post/update notification from repack lifecycle
+  - Initial notification on repack start (indeterminate progress)
+  - Progress updates from onProgress callback (determinate progress bar)
+  - Key fix: notification update is OUTSIDE Activity null-check (works when minimized)
+- IMPL-003: Show completion/failure notification
+  - Success: "Repack Completed — Completed in 2m 15s"
+  - Failure: "Repack Failed — error message"
+  - CancellationException: "Repack cancelled"
+- IMPL-004: Cancel notification in onResume when repack already finished
+- IMPL-005: Bug fix — moved notification call outside Activity null-check in onProgress
+- Committed as 2309fd1, pushed (2da7f6b..2309fd1)
+- Net change: 1 file, +90/-7 lines
+
+Stage Summary:
+- Commit 2309fd1 "feat: notification banner with progress while app is minimized"
+- No foreground service dependency — zero crash risk on Android 14/15/16
+- Notification uses existing channel from PayloadToolkitApp (CHANNEL_ID = "payload_toolkit_service")
+- Dedup: only updates notification when progress message changes (no spam)
+- All notification ops wrapped in try-catch (graceful degradation)
