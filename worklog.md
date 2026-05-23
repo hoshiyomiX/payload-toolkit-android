@@ -429,3 +429,36 @@ Stage Summary:
 - User sees "Compressing: XXX MB" during Step 1 and "Writing: XXX MB" during Step 3
 - Only logs on size CHANGE — no spam when file is static
 - Instant feedback on resume: shows current file size immediately
+
+---
+last_phase: DELIVER
+task: Fix log not showing repack progress updates
+complexity: Simple
+task_type: Coding
+files_modified: MainActivity.kt
+next_step: IDLE - verify CI green, test on Android 16
+
+Work Log:
+- Invoked Stellar Frameworks v5.11.0, followed protocol (SSV PASS)
+- Continuation: user reports log shows no progress updates during repack, only "Repack in progress"
+- SSV: fetched origin, HEAD at 7befb8b (which replaced file size polling with stdout streaming)
+- Root cause analysis:
+  - Commit 7befb8b replaced file-size polling with onOutputLine (stdout streaming)
+  - Python only outputs __PROGRESS__ machine-readable markers during compression
+  - These markers are intercepted by Kotlin parseProgressLine() and STRIPPED (returns true → continue)
+  - The onOutputLine callback only receives lines NOT matching __PROGRESS__ pattern
+  - Python's only human-readable print() is the final summary at line 811/827 of dd.py
+  - Result: onOutputLine has nothing to stream during compression
+- Fix: Use onProgress callback to display progress info in the log
+  - onProgress already receives parsed ProgressUpdate(current, total, message, percent)
+  - Added lastProgressMessage to companion object (avoids log spam with duplicates)
+  - Logs "[PROGRESS] message (XX%)" only when message changes
+  - Reset lastProgressMessage when new repack starts
+- Committed as 2da7f6b, pushed (7befb8b..2da7f6b)
+- Net change: +11 lines (1 file)
+
+Stage Summary:
+- Commit 2da7f6b "fix: show progress updates in log from __PROGRESS__ markers"
+- User will now see: [PROGRESS] Building ddbundle.bin (33%), [PROGRESS] Compressing product (67%), etc.
+- Progress bar + log both update from the same onProgress callback
+- Dedup: same message won't be logged twice (streaming compression sends many updates)
