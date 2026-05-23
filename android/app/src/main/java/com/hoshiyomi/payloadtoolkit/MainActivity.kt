@@ -33,6 +33,9 @@ import java.io.FileOutputStream
 import androidx.core.content.edit
 import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
+import android.app.NotificationManager
+import android.app.PendingIntent
+import androidx.core.app.NotificationCompat
 
 /**
  * MainActivity — Payload Toolkit Android.
@@ -78,6 +81,72 @@ class MainActivity : AppCompatActivity() {
 
         // Track last progress message to avoid spamming the log with duplicates
         @Volatile private var lastProgressMessage: String = ""
+
+        // Notification management (survives Activity recreation)
+        private const val NOTIFICATION_ID = 1001
+        @Volatile private var appContext: Context? = null
+
+        /** Show ongoing progress notification with determinate progress bar. */
+        fun showProgressNotification(message: String, percent: Int) {
+            val ctx = appContext ?: return
+            try {
+                val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                val intent = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)?.apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                } ?: return
+                val pi = PendingIntent.getActivity(
+                    ctx, 0, intent,
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+                val notification = NotificationCompat.Builder(ctx, PayloadToolkitApp.CHANNEL_ID)
+                    .setSmallIcon(android.R.drawable.ic_media_play)
+                    .setContentTitle("Payload Toolkit")
+                    .setContentText(message)
+                    .setProgress(100, percent.coerceIn(0, 100), percent == 0)
+                    .setOngoing(true)
+                    .setSilent(true)
+                    .setContentIntent(pi)
+                    .setPriority(NotificationCompat.PRIORITY_LOW)
+                    .build()
+                nm.notify(NOTIFICATION_ID, notification)
+            } catch (_: Exception) { /* notification is non-critical */ }
+        }
+
+        /** Show completion/failure notification (auto-dismissable). */
+        fun showCompletionNotification(success: Boolean, message: String) {
+            val ctx = appContext ?: return
+            try {
+                val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                val intent = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)?.apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                } ?: return
+                val pi = PendingIntent.getActivity(
+                    ctx, 0, intent,
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+                val notification = NotificationCompat.Builder(ctx, PayloadToolkitApp.CHANNEL_ID)
+                    .setSmallIcon(android.R.drawable.ic_media_play)
+                    .setContentTitle(if (success) "Repack Completed" else "Repack Failed")
+                    .setContentText(message)
+                    .setOngoing(false)
+                    .setAutoCancel(true)
+                    .setContentIntent(pi)
+                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                    .build()
+                nm.notify(NOTIFICATION_ID, notification)
+            } catch (_: Exception) { /* notification is non-critical */ }
+        }
+
+        /** Cancel the repack notification. */
+        fun cancelRepackNotification() {
+            try {
+                appContext?.let {
+                    (it.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                        .cancel(NOTIFICATION_ID)
+                }
+            } catch (_: Exception) { /* notification is non-critical */ }
+            appContext = null
+        }
     }
 
     // App-internal directories
@@ -665,8 +734,10 @@ class MainActivity : AppCompatActivity() {
         lastProgressMessage = ""
         isRepacking = true
         isExecuting = true
+        appContext = applicationContext
         setUIExecuting(true)
         showLog("[INFO] Starting repack operation...\n", LogLevel.INFO)
+        showProgressNotification("Preparing repack...", 0)
 
         // Execute in application-scoped scope (survives Activity destruction)
         repackScope.launch {
@@ -691,7 +762,14 @@ class MainActivity : AppCompatActivity() {
                     level = selectedCompressionLevel,
                     outputPath = outPath,
                     onProgress = { progress ->
-                        // Safe UI update — uses current Activity reference
+                        // Update notification (works even when Activity is destroyed)
+                        val msg = "${progress.message} (${progress.percent}%)"
+                        if (msg != lastProgressMessage) {
+                            lastProgressMessage = msg
+                            showProgressNotification("${progress.message} — ${progress.percent}%", progress.percent)
+                        }
+
+                        // Safe UI update — only when Activity is available
                         val current = activityRef?.get()
                         if (current != null && !current.isFinishing && !current.isDestroyed) {
                             current.runOnUiThread {
@@ -702,12 +780,8 @@ class MainActivity : AppCompatActivity() {
                                     bar.progress = progress.percent
                                 }
                             }
-                            // Log progress message if it changed (avoid log spam)
-                            val msg = "${progress.message} (${progress.percent}%)"
-                            if (msg != lastProgressMessage) {
-                                lastProgressMessage = msg
-                                current.showLog("[PROGRESS] $msg\n", LogLevel.PLAIN)
-                            }
+                            // Log progress message
+                            current.showLog("[PROGRESS] $msg\n", LogLevel.PLAIN)
                         }
                     },
                     onOutputLine = { line ->
@@ -730,6 +804,7 @@ class MainActivity : AppCompatActivity() {
                     )
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
+                showCompletionNotification(false, "Repack cancelled")
                 throw e  // Don't swallow coroutine cancellation
             } catch (e: Exception) {
                 val current = activityRef?.get()
@@ -737,6 +812,7 @@ class MainActivity : AppCompatActivity() {
                     current.showLog("[ERROR] Repack failed: ${e.message}\n", LogLevel.ERROR)
                     current.showLog("[INFO] Check logcat for details.\n", LogLevel.WARN)
                 }
+                showCompletionNotification(false, "${e.message}")
             } finally {
                 // Release WakeLock
                 try { wakeLock?.release() } catch (_: Exception) {}
@@ -761,11 +837,15 @@ class MainActivity : AppCompatActivity() {
 
         showLog("\n" + "\u2550".repeat(50) + "\n")
         if (success) {
+            val duration = if (durationMs < 60000) "${durationMs / 1000}s"
+                else "${durationMs / 60000}m ${durationMs % 60000}"
             showLog("Completed in ${durationMs}ms\n", LogLevel.SUCCESS)
             showLog("Output: $lastOutputPath\n", LogLevel.INFO)
+            showCompletionNotification(true, "Completed in $duration")
         } else {
             showLog("Failed in ${durationMs}ms\n", LogLevel.ERROR)
             showLog("Error: $error\n", LogLevel.ERROR)
+            showCompletionNotification(false, error ?: "Unknown error")
         }
         showLog("\u2550".repeat(50) + "\n\n")
         showLog("[INFO] Repack finished\n", LogLevel.INFO)
@@ -838,6 +918,9 @@ class MainActivity : AppCompatActivity() {
             isExecuting = true
             setUIExecuting(true)
             showLog("[INFO] Repack in progress (returned from background)\n", LogLevel.INFO)
+        } else {
+            // Repack finished while app was in background — cancel notification
+            cancelRepackNotification()
         }
     }
 
