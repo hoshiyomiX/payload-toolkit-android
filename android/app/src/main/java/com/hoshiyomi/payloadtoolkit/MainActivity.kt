@@ -1,15 +1,13 @@
 package com.hoshiyomi.payloadtoolkit
 
+import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.ClipData
-import android.provider.DocumentsContract
 import android.content.ClipboardManager
 import android.content.Context
-import android.Manifest
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.content.BroadcastReceiver
-import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
