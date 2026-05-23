@@ -1,17 +1,16 @@
 package com.hoshiyomi.payloadtoolkit
 
 import android.Manifest
-import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.PowerManager
 import android.provider.DocumentsContract
 import android.provider.Settings
 import android.view.View
@@ -21,10 +20,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
-import androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.hoshiyomi.payloadtoolkit.service.PayloadService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -58,7 +55,7 @@ class MainActivity : AppCompatActivity() {
     private var selectedCompressionLevel: Int = 0  // 0 = default (best)
     private var imageFiles: MutableList<Pair<String, String>> = mutableListOf() // (name, path)
     private var isExecuting = false
-    private var repackReceiver: BroadcastReceiver? = null
+    private var repackWakeLock: PowerManager.WakeLock? = null
 
     // App-internal directories
     private lateinit var inputDir: File
@@ -583,17 +580,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onBackPressed() {
         if (isExecuting) {
-            // Foreground service keeps repack alive even if user leaves
             MaterialAlertDialogBuilder(this)
                 .setTitle("Repack in progress")
-                .setMessage("The repack operation is running in the background service. " +
-                    "You can safely leave the app — it will continue. " +
-                    "A notification will show progress.")
-                .setPositiveButton("Leave") { _, _ ->
-                    // Don't stop the service — let it run in background
-                    moveTaskToBack(true)
-                }
-                .setNegativeButton("Stay", null)
+                .setMessage("The repack operation is still running. " +
+                    "Keep the app in the foreground to avoid interruption.")
+                .setPositiveButton("Stay", null)
                 .show()
         } else {
             super.onBackPressed()
@@ -649,121 +640,35 @@ class MainActivity : AppCompatActivity() {
         // Store output path for result handler
         _lastOutputPath = outPath
 
-        // Execute repack via foreground service (survives minimize, screen off, OOM)
+        // Execute repack directly in lifecycleScope with WakeLock
         isExecuting = true
         setUIExecuting(true)
         showLog("[INFO] Starting repack operation...\n", LogLevel.INFO)
-        startRepackService(images, deviceValue, outPath)
-    }
-
-    private var _lastOutputPath: String = ""
-
-    /**
-     * Start the foreground service for repack.
-     * The service holds a WakeLock, shows a notification with progress,
-     * and broadcasts results back to this Activity.
-     */
-    private fun startRepackService(
-        images: Map<String, String>,
-        device: String,
-        outputPath: String
-    ) {
-        // Request notification permission for Android 13+
-        requestNotificationIfNeeded()
-
-        val serviceIntent = Intent(this, PayloadService::class.java).apply {
-            @Suppress("DEPRECATION")
-            putExtra("images", HashMap(images))
-            putExtra("device", device)
-            putExtra("compression", selectedCompression)
-            putExtra("level", selectedCompressionLevel)
-            putExtra("output_path", outputPath)
-        }
-
-        // Start service first — MUST happen before any receiver registration
-        // so we don't end up with a running service but no receiver on failure.
-        val serviceStarted = try {
-            startForegroundService(serviceIntent)
-            true
-        } catch (e: Exception) {
-            showLog("[WARN] Service start failed: ${e.message}\n", LogLevel.WARN)
-            false
-        }
-
-        if (serviceStarted) {
-            // Service is running — register receiver to get progress + result broadcasts.
-            // On API 34+ (targetSdk 34), RECEIVER_NOT_EXPORTED flag is mandatory.
+        lifecycleScope.launch {
+            acquireRepackWakeLock()
             try {
-                registerRepackReceiver()
-            } catch (e: Exception) {
-                showLog("[WARN] Receiver registration failed: ${e.message}\n", LogLevel.WARN)
-                showLog("[INFO] Service is running but progress updates unavailable.\n", LogLevel.WARN)
-                // Don't fall back — service already started, it will complete independently.
-                // Result won't be shown in UI but output file will still be generated.
-            }
-        } else {
-            // Service failed to start — fall back to direct lifecycleScope execution.
-            // No receiver needed since we handle result inline.
-            showLog("[INFO] Using direct execution fallback.\n", LogLevel.INFO)
-            lifecycleScope.launch {
-                val result = executeRepackDirect(images, device, outputPath)
+                val result = executeRepack(images, deviceValue, outPath)
                 handleRepackResult(
                     success = result.success,
                     output = result.output,
                     error = result.error,
                     durationMs = result.durationMs
                 )
+            } finally {
+                releaseRepackWakeLock()
                 isExecuting = false
                 setUIExecuting(false)
             }
         }
     }
 
-    /**
-     * Register BroadcastReceiver for service progress + result broadcasts.
-     */
-    private fun registerRepackReceiver() {
-        repackReceiver?.let { unregisterReceiver(it) }
-        repackReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) {
-                when (intent.action) {
-                    PayloadService.ACTION_REPACK_PROGRESS -> {
-                        val percent = intent.getIntExtra(PayloadService.EXTRA_PROGRESS_PERCENT, 0)
-                        val message = intent.getStringExtra(PayloadService.EXTRA_PROGRESS_MESSAGE) ?: ""
-                        val progressBar = findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.progressBar)
-                        if (progressBar != null) {
-                            progressBar.isIndeterminate = false
-                            progressBar.progress = percent
-                        }
-                    }
-                    PayloadService.ACTION_REPACK_RESULT -> {
-                        val success = intent.getBooleanExtra(PayloadService.EXTRA_SUCCESS, false)
-                        val output = intent.getStringExtra(PayloadService.EXTRA_OUTPUT) ?: ""
-                        val error = intent.getStringExtra(PayloadService.EXTRA_ERROR) ?: ""
-                        val duration = intent.getLongExtra(PayloadService.EXTRA_DURATION_MS, 0)
-                        unregisterReceiverSafe()
-                        handleRepackResult(success, output, error, duration)
-                    }
-                }
-            }
-        }
-        val filter = IntentFilter().apply {
-            addAction(PayloadService.ACTION_REPACK_PROGRESS)
-            addAction(PayloadService.ACTION_REPACK_RESULT)
-        }
-        // RECEIVER_NOT_EXPORTED required on API 34+ (targetSdk 34)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(repackReceiver, filter, RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            registerReceiver(repackReceiver, filter)
-        }
-    }
+    private var _lastOutputPath: String = ""
 
     /**
-     * Fallback: execute repack directly in lifecycleScope (used only if service fails).
+     * Execute repack directly in lifecycleScope.
+     * Uses WakeLock to prevent CPU sleep during heavy I/O.
      */
-    private suspend fun executeRepackDirect(
+    private suspend fun executeRepack(
         imagesParam: Map<String, String>,
         deviceParam: String,
         outputPath: String
@@ -786,21 +691,24 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun unregisterReceiverSafe() {
-        try {
-            repackReceiver?.let { unregisterReceiver(it) }
-        } catch (_: Exception) { /* already unregistered */ }
-        repackReceiver = null
+    /**
+     * Acquire WakeLock to prevent CPU sleep during heavy compression I/O.
+     * 30-minute safety timeout as backstop.
+     */
+    private fun acquireRepackWakeLock() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        repackWakeLock = pm.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "PayloadToolkit::RepackWakeLock"
+        ).apply {
+            setReferenceCounted(false)
+            acquire(30 * 60 * 1000L)
+        }
     }
 
-    private fun requestNotificationIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
-            }
-        }
+    private fun releaseRepackWakeLock() {
+        try { repackWakeLock?.release() } catch (_: Exception) { /* already released */ }
+        repackWakeLock = null
     }
 
     /**
@@ -885,19 +793,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // If service was running while we were in background, re-register receiver
-        if (isExecuting) {
-            try {
-                registerRepackReceiver()
-            } catch (e: Exception) {
-                showLog("[WARN] Failed to re-register receiver: ${e.message}\n", LogLevel.WARN)
-            }
-        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        unregisterReceiverSafe()
+        releaseRepackWakeLock()
     }
 
     private fun setUIExecuting(executing: Boolean) {
