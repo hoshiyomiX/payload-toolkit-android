@@ -645,6 +645,16 @@ def run(*args, **kwargs):
         compress_name = compress_alg
         decomp_cmd = COMPRESS_CMD_MAP[compress_id]
         num_parts = len(images)
+        total_steps = 2 + num_parts  # Step 1 (compression) + Step 2 (scripts) + Step 3 (ZIP)
+
+        # Boost process priority for CPU-intensive compression.
+        # os.nice(-5) lowers the nice value (higher priority) without requiring root.
+        # On Android, regular apps can typically nice down to -5 or -10.
+        try:
+            import os as _os
+            _os.nice(-5)
+        except Exception:
+            pass  # Non-critical: some Android builds restrict nice()
 
         lines.append("\u2550" * 50)
         lines.append("REPACK: Generate flashable OTA ZIP")
@@ -665,7 +675,7 @@ def run(*args, **kwargs):
         lines.append("")
 
         # ── Step 1: Build ddbundle.bin ──
-        _report_progress(1, 3, "Building ddbundle.bin")
+        _report_progress(1, total_steps, "Building ddbundle.bin")
         lines.append(f"[Step 1] Building ddbundle.bin...")
         lines.append(f"  Compressing {num_parts} partition(s) with {compress_name}{level_display}...")
 
@@ -680,7 +690,7 @@ def run(*args, **kwargs):
         data_blobs = bytearray()
 
         for i, (name, path) in enumerate(images.items()):
-            _report_progress(1 + i, 2 + num_parts, f"Compressing {name}")
+            _report_progress(1 + i, total_steps, f"Compressing {name}")
 
             # Stream-read file: hash while reading to avoid double pass
             sha = hashlib.sha256()
@@ -705,10 +715,11 @@ def run(*args, **kwargs):
                 # for 30-60+ minutes on mobile.
                 comp_data = compress_streaming(
                     raw_data, compress_alg, level=level,
-                    on_progress=lambda done, tot, _n=name: _report_progress(
-                        1 + i + done / max(tot, 1),
-                        2 + num_parts,
-                        f"Compressing {_n} {done / max(tot, 1) * 100:.0f}%"
+                    on_progress=lambda done, tot, _n=name, _i=i, _np=total_steps: _report_progress(
+                        1 + _i + done / max(tot, 1),
+                        _np,
+                        f"Compressing {_n} {done / max(tot, 1) * 100:.0f}%",
+                        percent=int((1 + _i + done / max(tot, 1)) / _np * 100)
                     )
                 )
             del raw_data  # free raw data after compression
@@ -740,7 +751,7 @@ def run(*args, **kwargs):
         lines.append("")
 
         # ── Step 2: Build flasher scripts ──
-        _report_progress(1 + num_parts, 2 + num_parts, "Building flasher scripts")
+        _report_progress(1 + num_parts, total_steps, "Building flasher scripts")
         lines.append("[Step 2] Building flasher scripts...")
 
         update_binary = _build_update_script(
@@ -758,7 +769,7 @@ def run(*args, **kwargs):
         lines.append("")
 
         # ── Step 3: Write output ZIP ──
-        _report_progress(2 + num_parts, 2 + num_parts, "Writing output ZIP")
+        _report_progress(2 + num_parts, total_steps, "Writing output ZIP")
         lines.append(f"[Step 3] Writing {os.path.basename(output_path)}...")
 
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)

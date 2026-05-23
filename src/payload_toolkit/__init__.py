@@ -35,24 +35,38 @@ def set_progress_callback(callback):
     _progress_callback = callback
 
 
-def _report_progress(current, total, message=""):
+def _report_progress(current, total, message="", percent=None):
     """Internal helper to invoke the progress callback if set.
 
     Also prints a machine-readable progress marker to stdout so the
     Kotlin exec-mode bridge can parse it in real time (line-by-line).
-    Format:  __PROGRESS__<current>/<total>/<message>
+    Format:  __PROGRESS__<current>/<total>/<message>[/<percent>]
+
+    When *percent* is provided (0-100), it is appended as a 4th field
+    so the Kotlin side can use the exact compression percentage for the
+    progress bar instead of the coarse integer current/total division.
     """
     # Stdout marker for Kotlin stdout-line parsing (exec mode)
     try:
         msg_clean = str(message).replace("/", "_").replace("\\", "_")
-        print(f"__PROGRESS__{int(current)}/{int(total)}/{msg_clean}", flush=True)
+        if percent is not None:
+            print(f"__PROGRESS__{int(current)}/{int(total)}/{msg_clean}/{int(percent)}", flush=True)
+        else:
+            print(f"__PROGRESS__{int(current)}/{int(total)}/{msg_clean}", flush=True)
     except Exception:
         pass
 
     # In-process callback (JNI mode or direct Python usage)
     if _progress_callback is not None:
         try:
-            _progress_callback(int(current), int(total), str(message))
+            pct = int(percent) if percent is not None else (int(current) * 100 // max(int(total), 1))
+            _progress_callback(int(current), int(total), str(message), pct)
+        except TypeError:
+            # Legacy callback with 3 args
+            try:
+                _progress_callback(int(current), int(total), str(message))
+            except Exception:
+                pass
         except Exception:
             pass  # Don't let progress reporting crash the operation
 
