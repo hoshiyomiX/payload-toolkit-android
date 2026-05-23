@@ -795,7 +795,9 @@ object PythonBridge {
         val payload = line.substring(idx + PROGRESS_MARKER.length)
         val parts = payload.split("/", limit = 4)
         if (parts.size >= 2) {
-            val current = parts[0].toIntOrNull() ?: return false
+            // Python sends float current during compression sub-progress (e.g. "1.33/5/...").
+            // toIntOrNull() drops these — use toDoubleOrNull() first, then truncate.
+            val current = parts[0].toDoubleOrNull()?.toInt() ?: parts[0].toIntOrNull() ?: return false
             val total = parts[1].toIntOrNull() ?: return false
             val message = if (parts.size >= 3) parts[2].replace("_", " ") else ""
             // Use explicit percent from 4th field if available, otherwise compute from current/total
@@ -819,7 +821,7 @@ object PythonBridge {
             val payload = line.substring(idx + PROGRESS_MARKER.length)
             val parts = payload.split("/", limit = 4)
             if (parts.size >= 2) {
-                val current = parts[0].toIntOrNull() ?: continue
+                val current = parts[0].toDoubleOrNull()?.toInt() ?: parts[0].toIntOrNull() ?: continue
                 val total = parts[1].toIntOrNull() ?: continue
                 val message = if (parts.size >= 3) parts[2].replace("_", " ") else ""
                 val percent = if (parts.size >= 4) {

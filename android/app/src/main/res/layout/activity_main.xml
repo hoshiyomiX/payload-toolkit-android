@@ -420,11 +420,12 @@
                 app:icon="@android:drawable/ic_media_play"
                 app:iconGravity="textStart" />
 
+            <!-- Per-partition progress bars + labels (built programmatically) -->
             <LinearLayout
                 android:id="@+id/progressBarContainer"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
+                android:orientation="vertical"
                 android:visibility="gone"
                 android:layout_marginBottom="10dp" />
 

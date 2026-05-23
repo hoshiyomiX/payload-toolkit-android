@@ -92,6 +92,7 @@ class MainActivity : AppCompatActivity() {
         @Volatile private var partitionCount: Int = 0
         @Volatile private var partitionProgress: IntArray = IntArray(0)
         @Volatile private var currentPartitionIndex: Int = -1
+        @Volatile private var partitionNames: List<String> = emptyList()
 
         // Notification management (survives Activity recreation)
         private const val NOTIFICATION_ID = 1001
@@ -750,7 +751,9 @@ class MainActivity : AppCompatActivity() {
         isExecuting = true
         appContext = applicationContext
         setUIExecuting(true)
-        setupSplitProgressBar(images.size)
+        val sortedNames = images.keys.sorted()
+        partitionNames = sortedNames
+        setupSplitProgressBar(sortedNames)
         showLog("[INFO] Starting repack operation...\n", LogLevel.INFO)
         showProgressNotification("Preparing repack...", 0)
 
@@ -784,14 +787,41 @@ class MainActivity : AppCompatActivity() {
                             showProgressNotification(msg, progress.percent)
                         }
 
-                        // Update split progress bars (per-partition)
-                        if (partitionCount > 0 && progress.current >= 1) {
-                            val idx = (progress.current - 1).coerceIn(0, partitionCount - 1)
-                            partitionProgress[idx] = progress.percent
-                            currentPartitionIndex = idx
-                            // Mark all partitions before current as complete
-                            for (j in 0 until idx) {
-                                if (partitionProgress[j] < 100) partitionProgress[j] = 100
+                        // Update split progress bars (per-partition) using message-based mapping.
+                        // progress.current is 1-based across ALL steps (Step 1 + N partitions + Step 2 + Step 3),
+                        // so numeric index mapping is unreliable. Map by partition name from message instead.
+                        if (partitionCount > 0) {
+                            val msg = progress.message
+                            val pIdx = when {
+                                msg.startsWith("Compressing ") -> {
+                                    val name = msg.removePrefix("Compressing ").trim()
+                                    partitionNames.indexOf(name)
+                                }
+                                msg.contains("Building ddbundle") -> {
+                                    // Pre-partition step: show bar 0 as indeterminate (process started)
+                                    currentPartitionIndex = 0
+                                    -2  // special sentinel
+                                }
+                                msg.contains("Building flasher") || msg.contains("Writing output") -> {
+                                    // Post-partition steps: mark all bars complete
+                                    for (j in 0 until partitionCount) {
+                                        partitionProgress[j] = 100
+                                    }
+                                    currentPartitionIndex = partitionCount - 1
+                                    -1  // skip bar update below
+                                }
+                                else -> -1
+                            }
+                            when {
+                                pIdx == -2 -> { /* indeterminate handled in UI update block */ }
+                                pIdx >= 0 && pIdx < partitionCount -> {
+                                    partitionProgress[pIdx] = progress.percent
+                                    currentPartitionIndex = pIdx
+                                    // Relay: mark all previous partitions as complete
+                                    for (j in 0 until pIdx) {
+                                        if (partitionProgress[j] < 100) partitionProgress[j] = 100
+                                    }
+                                }
                             }
                         }
 
@@ -799,14 +829,21 @@ class MainActivity : AppCompatActivity() {
                         val current = activityRef?.get()
                         if (current != null && !current.isFinishing && !current.isDestroyed) {
                             current.runOnUiThread {
-                                // Update split progress bars
+                                // Update split progress bars — bars live inside a tagged horizontal child
                                 val container = current.findViewById<android.widget.LinearLayout>(R.id.progressBarContainer)
-                                if (container != null && container.childCount == partitionCount) {
+                                val barRow = container?.findViewWithTag<android.widget.LinearLayout>("bar_row")
+                                if (barRow != null && barRow.childCount == partitionCount) {
                                     for (i in 0 until partitionCount) {
-                                        val bar = container.getChildAt(i) as? com.google.android.material.progressindicator.LinearProgressIndicator
+                                        val bar = barRow.getChildAt(i) as? com.google.android.material.progressindicator.LinearProgressIndicator
                                         if (bar != null) {
-                                            bar.isIndeterminate = false
-                                            bar.progress = partitionProgress[i]
+                                            // During pre-partition step (sentinel -2), show bar 0 as indeterminate
+                                            if (currentPartitionIndex == 0 && partitionProgress[0] == 0 && i == 0
+                                                && progress.message.contains("Building ddbundle")) {
+                                                bar.isIndeterminate = true
+                                            } else {
+                                                bar.isIndeterminate = false
+                                                bar.progress = partitionProgress[i]
+                                            }
                                         }
                                     }
                                 }
@@ -961,7 +998,23 @@ class MainActivity : AppCompatActivity() {
             showLog("[INFO] Repack in progress (returned from background)\n", LogLevel.INFO)
             // Re-create split progress bars with current state
             if (partitionCount > 0) {
-                setupSplitProgressBar(partitionCount)
+                val savedProgress = partitionProgress.copyOf()
+                val savedIndex = currentPartitionIndex
+                setupSplitProgressBar(partitionNames)
+                // Restore progress state so bars reflect current position immediately
+                savedProgress.copyInto(partitionProgress)
+                currentPartitionIndex = savedIndex
+                val barRow = findViewById<android.widget.LinearLayout>(R.id.progressBarContainer)
+                    ?.findViewWithTag<android.widget.LinearLayout>("bar_row")
+                if (barRow != null) {
+                    for (i in 0 until partitionCount) {
+                        val bar = barRow.getChildAt(i) as? com.google.android.material.progressindicator.LinearProgressIndicator
+                        if (bar != null) {
+                            bar.isIndeterminate = false
+                            bar.progress = partitionProgress[i]
+                        }
+                    }
+                }
             }
         } else {
             // Repack finished while app was in background — cancel notification
@@ -978,24 +1031,74 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    private fun setupSplitProgressBar(count: Int) {
+    private fun setupSplitProgressBar(names: List<String>) {
+        val count = names.size
         partitionCount = count
         partitionProgress = IntArray(count)
         currentPartitionIndex = -1
         val container = findViewById<android.widget.LinearLayout>(R.id.progressBarContainer) ?: return
         container.removeAllViews()
+        container.orientation = android.widget.LinearLayout.VERTICAL
         container.visibility = View.VISIBLE
+
+        // Horizontal row for progress bars
+        val barRow = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            tag = "bar_row"
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        // Horizontal row for partition name labels
+        val labelRow = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dpToPx(4)
+            }
+        }
+
         for (i in 0 until count) {
+            val name = names.getOrElse(i) { "" }
+            val isLast = (i == count - 1)
+            val gap = if (!isLast) dpToPx(4) else 0
+
+            // Progress bar for this partition
             val bar = com.google.android.material.progressindicator.LinearProgressIndicator(this).apply {
                 layoutParams = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginEnd = if (i < count - 1) dpToPx(4) else 0
+                    marginEnd = gap
                 }
                 isIndeterminate = false
                 progress = 0
                 trackColor = ContextCompat.getColor(this@MainActivity, R.color.md_theme_light_surfaceVariant)
             }
-            container.addView(bar)
+            barRow.addView(bar)
+
+            // Partition name label — use theme attribute for dark mode support
+            val tv = android.util.TypedValue()
+            theme.resolveAttribute(android.R.attr.textColorSecondary, tv, true)
+            val labelColor = ContextCompat.getColor(this@MainActivity, tv.resourceId)
+
+            val label = android.widget.TextView(this).apply {
+                text = name
+                textSize = 10f
+                setTextColor(labelColor)
+                gravity = android.view.Gravity.CENTER
+                layoutParams = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginEnd = gap
+                }
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            }
+            labelRow.addView(label)
         }
+
+        container.addView(barRow)
+        container.addView(labelRow)
     }
 
     private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
@@ -1012,6 +1115,7 @@ class MainActivity : AppCompatActivity() {
                 partitionCount = 0
                 partitionProgress = IntArray(0)
                 currentPartitionIndex = -1
+                partitionNames = emptyList()
             }
             findViewById<View>(R.id.buttonAddImages)?.isEnabled = !executing
             findViewById<View>(R.id.buttonRemoveAll)?.isEnabled = !executing
