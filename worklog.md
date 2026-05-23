@@ -312,3 +312,41 @@ Stage Summary:
 - No more foreground service dependency — zero crash surface on Android 14/15/16
 - WakeLock prevents CPU sleep during heavy compression I/O
 - PayloadService.kt + manifest declaration left in place (harmless, unused)
+
+---
+last_phase: DELIVER
+task: Fix repack crash — missing WAKE_LOCK permission + acquireRepackWakeLock outside try-catch
+complexity: Standard
+task_type: Coding
+files_modified: AndroidManifest.xml, MainActivity.kt
+traceability: N/A (Simple-tier within continuation)
+pivot: NONE
+scope_drift: NONE
+next_step: IDLE - verify CI green, test on Android 16
+
+Work Log:
+- Invoked Stellar Frameworks v5.11.0, followed protocol (SSV PASS)
+- Continuation: user reports crash persists even after foreground service removal (143a4c7)
+- CI for 143a4c7 passed (run #112) — APK builds correctly
+- Full code audit: read MainActivity.kt, PayloadBridge.kt, PythonBridge.kt, PyBridge.kt
+  - Foreground service completely removed — zero references
+  - PayloadBridge.dd() execution path looks safe
+  - PythonBridge.executePyz() has JNI/exec dual mode, both wrapped in try-catch
+- Found 2 bugs:
+  - Bug 1 (ROOT CAUSE): android.permission.WAKE_LOCK NOT declared in AndroidManifest.xml
+    - acquireRepackWakeLock() calls WakeLock.acquire() → SecurityException
+    - PowerManagerService checks manifest at runtime
+  - Bug 2: acquireRepackWakeLock() was OUTSIDE the try-catch block in coroutine
+    - Any exception left isExecuting=true, UI frozen (progress bar, button disabled)
+- Fix:
+  - Added android.permission.WAKE_LOCK to AndroidManifest.xml
+  - Moved acquireRepackWakeLock() inside try block
+  - Added catch(e: Exception) to log errors to UI instead of silent failure
+- Committed as a867bca, pushed (143a4c7..a867bca)
+- Net change: 2 files, +7/-1 lines
+
+Stage Summary:
+- Commit a867bca "fix: add missing WAKE_LOCK permission + wrap acquireRepackWakeLock in try-catch"
+- WAKE_LOCK is a normal permission (auto-granted) but MUST be declared in manifest
+- Previous 3 "crashes" were foreground service; this 4th one was WakeLock permission
+- Both bugs now fixed: permission declared + exception properly caught and logged
