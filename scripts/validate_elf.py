@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """validate_elf.py — Validate ELF files: phdr table + PT_LOAD/PT_DYNAMIC segment bounds.
 
+Supports both ELF32 (armeabi-v7a) and ELF64 (arm64-v8a) formats.
+
 Detects .so files that would crash the Android bionic linker with
 "Load CHECK 'did_read_' failed" — this occurs when a PT_LOAD segment's
 p_offset + p_filesz exceeds the file size (the linker mmaps the file
@@ -9,6 +11,7 @@ and tries to read segment data past EOF).
 Usage:
     python3 validate_elf.py <directory>   — validate all .so files in directory
     python3 validate_elf.py <file.so>     — validate a single file
+    python3 validate_elf.py --audit-needed <directory> — check for versioned DT_NEEDED
 
 Exit code: 0 if all valid, 1 if any file has errors.
 """
@@ -19,8 +22,130 @@ import os
 
 # ELF constants
 ELF_MAGIC = b'\x7fELF'
+ELFCLASS32 = 1
+ELFCLASS64 = 2
+ELFDATA2LSB = 1  # Little-endian
 PT_LOAD = 1
 PT_DYNAMIC = 2
+
+# Dynamic section tags
+DT_NULL = 0
+DT_NEEDED = 1
+DT_STRTAB = 5
+DT_STRSZ = 10
+DT_SONAME = 14
+
+
+def _get_elf_class(data):
+    """Return ELF class (ELFCLASS32 or ELFCLASS64) or None if invalid."""
+    if len(data) < 16 or data[:4] != ELF_MAGIC or data[5] != ELFDATA2LSB:
+        return None
+    cls = data[4]
+    if cls not in (ELFCLASS32, ELFCLASS64):
+        return None
+    return cls
+
+
+def _parse_ehdr(data, elf_class):
+    """Parse ELF header fields. Returns (e_phoff, e_phentsize, e_phnum) or None."""
+    if elf_class == ELFCLASS64:
+        if len(data) < 64:
+            return None
+        e_phoff = struct.unpack_from('<Q', data, 32)[0]
+        e_phentsize = struct.unpack_from('<H', data, 54)[0]
+        e_phnum = struct.unpack_from('<H', data, 56)[0]
+    else:  # ELFCLASS32
+        if len(data) < 52:
+            return None
+        e_phoff = struct.unpack_from('<I', data, 28)[0]
+        e_phentsize = struct.unpack_from('<H', data, 42)[0]
+        e_phnum = struct.unpack_from('<H', data, 44)[0]
+    return e_phoff, e_phentsize, e_phnum
+
+
+def _parse_phdr(data, elf_class, entry_off):
+    """Parse a single program header entry. Returns dict or None."""
+    size = len(data)
+    if elf_class == ELFCLASS64:
+        # ELF64 Phdr layout (56 bytes each):
+        #   0: p_type   (4B)   4: p_flags  (4B)
+        #   8: p_offset (8B)  16: p_vaddr  (8B)  24: p_paddr (8B)
+        #  32: p_filesz (8B)  40: p_memsz  (8B)  48: p_align (8B)
+        if entry_off + 56 > size:
+            return None
+        p_type = struct.unpack_from('<I', data, entry_off)[0]
+        p_offset = struct.unpack_from('<Q', data, entry_off + 8)[0]
+        p_filesz = struct.unpack_from('<Q', data, entry_off + 32)[0]
+    else:  # ELFCLASS32
+        # ELF32 Phdr layout (32 bytes each):
+        #   0: p_type   (4B)   4: p_offset (4B)   8: p_vaddr (4B)
+        #  12: p_paddr  (4B)  16: p_filesz (4B)  20: p_memsz (4B)
+        #  24: p_flags  (4B)  28: p_align  (4B)
+        if entry_off + 32 > size:
+            return None
+        p_type = struct.unpack_from('<I', data, entry_off)[0]
+        p_offset = struct.unpack_from('<I', data, entry_off + 4)[0]
+        p_filesz = struct.unpack_from('<I', data, entry_off + 16)[0]
+    return {'p_type': p_type, 'p_offset': p_offset, 'p_filesz': p_filesz}
+
+
+def _find_dynamic_and_strtab(data):
+    """Find PT_DYNAMIC, DT_STRTAB, DT_STRSZ in an ELF binary (32 or 64-bit).
+
+    Returns (dynamic_off, dynamic_size, strtab_off, strsz) or None.
+    """
+    elf_class = _get_elf_class(data)
+    if elf_class is None:
+        return None
+
+    hdr = _parse_ehdr(data, elf_class)
+    if hdr is None:
+        return None
+    e_phoff, e_phentsize, e_phnum = hdr
+
+    # Find PT_DYNAMIC segment
+    size = len(data)
+    dynamic_off = dynamic_size = 0
+    for i in range(e_phnum):
+        entry_off = e_phoff + i * e_phentsize
+        phdr = _parse_phdr(data, elf_class, entry_off)
+        if phdr is None:
+            break
+        if phdr['p_type'] == PT_DYNAMIC:
+            dynamic_off = phdr['p_offset']
+            dynamic_size = phdr['p_filesz']
+            break
+
+    if dynamic_off == 0 or dynamic_size < 16:
+        return None
+
+    # Dynamic entry size depends on ELF class:
+    #   ELF64: 16 bytes (d_tag: 8B, d_val: 8B)
+    #   ELF32: 8 bytes  (d_tag: 4B, d_val: 4B)
+    dyn_entry_size = 16 if elf_class == ELFCLASS64 else 8
+    d_tag_fmt = '<Q' if elf_class == ELFCLASS64 else '<I'
+    d_val_fmt = '<Q' if elf_class == ELFCLASS64 else '<I'
+    d_val_off_in_entry = 8 if elf_class == ELFCLASS64 else 4
+
+    # Scan .dynamic for DT_STRTAB and DT_STRSZ
+    strtab_off = strsz = 0
+    pos = dynamic_off
+    end = min(dynamic_off + dynamic_size, size)
+    while pos + dyn_entry_size <= end:
+        d_tag = struct.unpack_from(d_tag_fmt, data, pos)[0]
+        d_val = struct.unpack_from(d_val_fmt, data, pos + d_val_off_in_entry)[0]
+        if d_tag == DT_NULL:
+            break
+        if d_tag == DT_STRTAB:
+            strtab_off = d_val
+        elif d_tag == DT_STRSZ:
+            strsz = d_val
+        pos += dyn_entry_size
+
+    if strtab_off == 0 or strsz == 0:
+        return None
+
+    return dynamic_off, dynamic_size, strtab_off, strsz
 
 
 def validate_elf(path):
@@ -32,28 +157,32 @@ def validate_elf(path):
         return f"cannot read: {e}"
 
     size = len(data)
-    if size < 64:
-        return f"too small for ELF64 header ({size} bytes)"
+    if size < 52:
+        return f"too small for ELF header ({size} bytes)"
 
     # Check ELF magic
     if data[:4] != ELF_MAGIC:
         return f"bad ELF magic: {data[:4].hex()}"
 
-    # Check EI_CLASS (byte 4): must be 2 for ELF64
-    if data[4] != 2:
-        return f"not ELF64 (class={data[4]})"
-
     # Check EI_DATA (byte 5): must be 1 for little-endian
-    if data[5] != 1:
+    if data[5] != ELFDATA2LSB:
         return f"not little-endian (data={data[5]})"
 
-    # ELF64 header fields (all little-endian on ARM64)
-    # e_phoff: offset 32, 8 bytes
-    # e_phentsize: offset 54, 2 bytes
-    # e_phnum: offset 56, 2 bytes
-    e_phoff = struct.unpack_from('<Q', data, 32)[0]
-    e_phentsize = struct.unpack_from('<H', data, 54)[0]
-    e_phnum = struct.unpack_from('<H', data, 56)[0]
+    # Detect ELF class
+    elf_class = _get_elf_class(data)
+    if elf_class is None:
+        return f"unknown ELF class (class={data[4]})"
+
+    class_name = "ELF32" if elf_class == ELFCLASS32 else "ELF64"
+    min_size = 52 if elf_class == ELFCLASS32 else 64
+    if size < min_size:
+        return f"too small for {class_name} header ({size} bytes)"
+
+    # Parse ELF header
+    hdr = _parse_ehdr(data, elf_class)
+    if hdr is None:
+        return f"failed to parse {class_name} header"
+    e_phoff, e_phentsize, e_phnum = hdr
 
     # Check phdr table bounds
     ph_table_end = e_phoff + e_phnum * e_phentsize
@@ -62,89 +191,24 @@ def validate_elf(path):
                 f"{e_phnum}x{e_phentsize} = {ph_table_end} > fileSize={size}")
 
     # Validate each program header entry
-    # ELF64 Phdr layout (56 bytes each):
-    #   0: p_type   (4 bytes, Elf64_Word)
-    #   4: p_flags  (4 bytes, Elf64_Word)
-    #   8: p_offset (8 bytes, Elf64_Off)
-    #  16: p_vaddr  (8 bytes, Elf64_Addr)
-    #  24: p_paddr  (8 bytes, Elf64_Addr)
-    #  32: p_filesz (8 bytes, Elf64_Xword)
-    #  40: p_memsz  (8 bytes, Elf64_Xword)
-    #  48: p_align  (8 bytes, Elf64_Xword)
     for i in range(e_phnum):
         entry_off = e_phoff + i * e_phentsize
-        if entry_off + e_phentsize > size:
+        phdr = _parse_phdr(data, elf_class, entry_off)
+        if phdr is None:
             return f"phdr[{i}] entry extends past file (offset={entry_off})"
 
-        p_type = struct.unpack_from('<I', data, entry_off)[0]
-        p_offset = struct.unpack_from('<Q', data, entry_off + 8)[0]
-        p_filesz = struct.unpack_from('<Q', data, entry_off + 32)[0]
+        p_type = phdr['p_type']
+        p_offset = phdr['p_offset']
+        p_filesz = phdr['p_filesz']
 
-        if p_type == PT_LOAD:
+        if p_type in (PT_LOAD, PT_DYNAMIC):
             seg_end = p_offset + p_filesz
             if seg_end > size:
-                return (f"PT_LOAD[{i}] segment overflows: offset={p_offset} + "
-                        f"filesz={p_filesz} = {seg_end} > fileSize={size}")
-        elif p_type == PT_DYNAMIC:
-            seg_end = p_offset + p_filesz
-            if seg_end > size:
-                return (f"PT_DYNAMIC[{i}] segment overflows: offset={p_offset} + "
+                seg_name = "PT_LOAD" if p_type == PT_LOAD else "PT_DYNAMIC"
+                return (f"{seg_name}[{i}] segment overflows: offset={p_offset} + "
                         f"filesz={p_filesz} = {seg_end} > fileSize={size}")
 
     return None
-
-
-# ELF dynamic section constants
-DT_NULL = 0
-DT_NEEDED = 1
-DT_STRTAB = 5
-DT_STRSZ = 10
-DT_SONAME = 14
-
-
-def _find_dynamic_and_strtab(data):
-    """Find PT_DYNAMIC, DT_STRTAB, DT_STRSZ in an ELF64 binary.
-    Returns (dynamic_off, dynamic_size, strtab_off, strsz) or None."""
-    size = len(data)
-    if size < 64 or data[:4] != ELF_MAGIC or data[4] != 2 or data[5] != 1:
-        return None
-
-    e_phoff = struct.unpack_from('<Q', data, 32)[0]
-    e_phentsize = struct.unpack_from('<H', data, 54)[0]
-    e_phnum = struct.unpack_from('<H', data, 56)[0]
-
-    dynamic_off = dynamic_size = 0
-    for i in range(e_phnum):
-        entry_off = e_phoff + i * e_phentsize
-        if entry_off + 24 > size:
-            break
-        p_type = struct.unpack_from('<I', data, entry_off)[0]
-        if p_type == PT_DYNAMIC:
-            dynamic_off = struct.unpack_from('<Q', data, entry_off + 8)[0]
-            dynamic_size = struct.unpack_from('<Q', data, entry_off + 32)[0]
-            break
-
-    if dynamic_off == 0 or dynamic_size < 16:
-        return None
-
-    # Scan .dynamic for DT_STRTAB and DT_STRSZ
-    strtab_off = strsz = 0
-    pos = dynamic_off
-    while pos + 16 <= min(dynamic_off + dynamic_size, size):
-        d_tag = struct.unpack_from('<Q', data, pos)[0]
-        d_val = struct.unpack_from('<Q', data, pos + 8)[0]
-        if d_tag == DT_NULL:
-            break
-        if d_tag == DT_STRTAB:
-            strtab_off = d_val
-        elif d_tag == DT_STRSZ:
-            strsz = d_val
-        pos += 16
-
-    if strtab_off == 0 or strsz == 0:
-        return None
-
-    return dynamic_off, dynamic_size, strtab_off, strsz
 
 
 def _str_replace_in_place(data, strtab_off, strsz, old_str, new_str):
@@ -172,6 +236,31 @@ def _str_replace_in_place(data, strtab_off, strsz, old_str, new_str):
     return False
 
 
+def _iter_dynamic_entries(data, dynamic_off, dynamic_size):
+    """Iterate over .dynamic entries, yielding (d_tag, d_val) pairs.
+
+    Handles both ELF32 and ELF64 entry sizes.
+    """
+    elf_class = _get_elf_class(data)
+    if elf_class is None:
+        return
+
+    dyn_entry_size = 16 if elf_class == ELFCLASS64 else 8
+    d_tag_fmt = '<Q' if elf_class == ELFCLASS64 else '<I'
+    d_val_fmt = '<Q' if elf_class == ELFCLASS64 else '<I'
+    d_val_off = 8 if elf_class == ELFCLASS64 else 4
+
+    pos = dynamic_off
+    end = min(dynamic_off + dynamic_size, len(data))
+    while pos + dyn_entry_size <= end:
+        d_tag = struct.unpack_from(d_tag_fmt, data, pos)[0]
+        d_val = struct.unpack_from(d_val_fmt, data, pos + d_val_off)[0]
+        yield d_tag, d_val
+        if d_tag == DT_NULL:
+            break
+        pos += dyn_entry_size
+
+
 def fix_soname(path, desired_soname):
     """Set DT_SONAME to desired_soname (typically the filename).
 
@@ -190,13 +279,9 @@ def fix_soname(path, desired_soname):
     dynamic_off, dynamic_size, strtab_off, strsz = result
 
     # Find DT_SONAME entry to get current SONAME string
-    pos = dynamic_off
-    while pos + 16 <= min(dynamic_off + dynamic_size, len(data)):
-        d_tag = struct.unpack_from('<Q', data, pos)[0]
-        if d_tag == DT_NULL:
-            break
+    for d_tag, d_val in _iter_dynamic_entries(data, dynamic_off, dynamic_size):
         if d_tag == DT_SONAME:
-            str_idx = struct.unpack_from('<Q', data, pos + 8)[0]
+            str_idx = int(d_val)
             # d_val is offset INTO .dynstr (strtab-relative).
             # Actual file offset = strtab_off + str_idx.
             if str_idx >= strsz:
@@ -212,7 +297,6 @@ def fix_soname(path, desired_soname):
                     f.write(data)
                 return True
             return False
-        pos += 16
     return False
 
 
@@ -245,6 +329,8 @@ def get_dt_needed_list(data):
     the .dynamic section and .dynstr — no external tools required.
     This is more reliable than `patchelf --print-needed` because it
     works even on files that patchelf cannot read after section growth.
+
+    Supports both ELF32 and ELF64 formats.
     """
     result = _find_dynamic_and_strtab(data)
     if result is None:
@@ -252,20 +338,14 @@ def get_dt_needed_list(data):
     dynamic_off, dynamic_size, strtab_off, strsz = result
 
     needed = []
-    pos = dynamic_off
-    while pos + 16 <= min(dynamic_off + dynamic_size, len(data)):
-        d_tag = struct.unpack_from('<Q', data, pos)[0]
-        d_val = struct.unpack_from('<Q', data, pos + 8)[0]
-        if d_tag == DT_NULL:
-            break
+    for d_tag, d_val in _iter_dynamic_entries(data, dynamic_off, dynamic_size):
         if d_tag == DT_NEEDED:
             # d_val is offset INTO .dynstr (strtab-relative, not a vaddr).
             # The actual file offset = strtab_off + d_val.
             # NOTE: This assumes DT_STRTAB vaddr == file offset, which is
-            # true for Termux aarch64 libs (first PT_LOAD: p_vaddr=0).
+            # true for Termux libs (first PT_LOAD: p_vaddr=0).
             str_idx = int(d_val)
             if str_idx >= strsz:
-                pos += 16
                 continue
             str_file_off = strtab_off + str_idx
             try:
@@ -274,7 +354,6 @@ def get_dt_needed_list(data):
                 needed.append(name)
             except (ValueError, IndexError):
                 pass
-        pos += 16
     return needed
 
 
