@@ -168,9 +168,13 @@ static void preload_native_libs(const char *lib_dir) {
     while ((entry = readdir(dir)) != NULL) {
         const char *name = entry->d_name;
         size_t len = strlen(name);
-        /* Must end with ".so" and not be the bridge itself */
+        /*
+         * Must end with ".so" or ".so.N" (versioned like .so.3, .so.1.0.8)
+         * and not be the bridge itself.  Most Android native libs have
+         * SONAME-style versioned names (libcrypto.so.3, libbz2.so.1.0.8).
+         */
         if (len < 4) continue;
-        if (strcmp(name + len - 3, ".so") != 0) continue;
+        if (strstr(name, ".so") == NULL) continue;
         if (strstr(name, "pybridge")) continue;
 
         char path[1024];

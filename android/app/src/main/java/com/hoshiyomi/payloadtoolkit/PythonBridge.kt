@@ -853,24 +853,30 @@ object PythonBridge {
             }
             env["PYTHONUNBUFFERED"] = "1"
 
-            val preloadLibs = mutableListOf<File>()
-            for (dep in execDirectDeps) {
-                val resolved = resolveLibName(dep)
-                if (resolved == null) continue
-                val depFile = File(libDir, resolved)
-                if (depFile.isFile) {
-                    preloadLibs.add(depFile)
-                } else {
-                    diag("[WARN] Direct dep not in nativeLibraryDir: $dep -> $resolved")
-                }
-            }
+            /*
+             * Preload ALL .so files from nativeLibraryDir via LD_PRELOAD.
+             * This ensures dependency libraries (libcrypto.so.3, libbz2.so.1.0.8,
+             * libz.so.1.3.2, etc.) are available when Python's C extensions
+             * (hashlib, bz2, zlib, lzma) load at import time.
+             *
+             * Previous approach used manifest-based direct deps only, but
+             * that missed indirect deps (e.g. libbz2 is needed by _bz2.so,
+             * not by libpython3exec.so directly).  Also, resolveLibName()
+             * stripped version numbers causing mismatch (libcrypto.so.3
+             * was resolved to libcrypto.so which doesn't exist).
+             */
+            val preloadLibs = nativeDir.listFiles()
+                ?.filter { it.name.endsWith(".so") || it.name.contains(".so.") }
+                ?.filter { !it.name.contains("pybridge") }
+                ?.sortedBy { it.name }
+                ?: emptyList()
             if (preloadLibs.isNotEmpty()) {
                 val preloadString = preloadLibs.joinToString(":", transform = { it.absolutePath })
                 env["LD_PRELOAD"] = preloadString
                 val preloadBytes = preloadLibs.sumOf { it.length() }
-                diag("[LD_PRELOAD] ${preloadLibs.size} direct deps ($preloadBytes bytes)")
+                diag("[LD_PRELOAD] ${preloadLibs.size} libs ($preloadBytes bytes)")
             } else {
-                diag("[LD_PRELOAD] no direct deps to preload")
+                diag("[LD_PRELOAD] no libs to preload")
             }
         } else {
             val py = pythonPath ?: return
