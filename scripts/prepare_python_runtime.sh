@@ -265,6 +265,33 @@ for arch_config in "${ARCH_CONFIGS[@]}"; do
     find "$JNI_DIR" -maxdepth 1 -name "_gdbm*.so" -delete 2>/dev/null || true
     find "$JNI_DIR" -maxdepth 1 -name "_dbm*.so" -delete 2>/dev/null || true
 
+    # Strip terminal/UI shared libraries not needed for payload_toolkit.
+    # These are transitive deps of the stripped extension modules above.
+    # No remaining .so (libpython3.13.so, extension modules) depends on them.
+    # Keeping them causes DT_NEEDED resolution failures at runtime:
+    #   libreadline.so needs libncursesw.so.6 (versioned) -> not found -> crash
+    # Removing them saves ~2.8 MB and eliminates the broken DT_NEEDED chain.
+    TERMINAL_LIBS=(
+        "libreadline.so"
+        "libhistory.so"
+        "libncursesw.so"
+        "libncurses.so"
+        "libcurses.so"
+        "libtermcap.so"
+        "libtic.so"
+        "libtinfo.so"
+    )
+    REMOVED_TERMINAL=0
+    for lib in "${TERMINAL_LIBS[@]}"; do
+        if [ -f "$JNI_DIR/$lib" ]; then
+            rm -f "$JNI_DIR/$lib"
+            REMOVED_TERMINAL=$((REMOVED_TERMINAL + 1))
+        fi
+    done
+    if [ "$REMOVED_TERMINAL" -gt 0 ]; then
+        echo "    Removed $REMOVED_TERMINAL terminal/UI shared libs (not needed)"
+    fi
+
     # =====================================================================
     #  2. Patch ELF headers (DT_SONAME + DT_NEEDED)
     # =====================================================================
