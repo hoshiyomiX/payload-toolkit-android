@@ -103,6 +103,10 @@ class MainActivity : AppCompatActivity() {
         private const val NOTIFICATION_ID = 1001
         @Volatile private var appContext: Context? = null
 
+        // Cached dependency check result (updated at init, used for pre-repack validation)
+        @Volatile var cachedDepCheck: PythonBridge.DepCheckResult? = null
+            private set
+
         /** Show ongoing progress notification with determinate progress bar. */
         fun showProgressNotification(message: String, percent: Int) {
             val ctx = appContext ?: return
@@ -277,6 +281,10 @@ class MainActivity : AppCompatActivity() {
                             }
                             if (depReport.isNotBlank()) {
                                 showLog(depReport + "\n")
+                            }
+                            // Cache parsed result for pre-repack validation
+                            cachedDepCheck = withContext(Dispatchers.IO) {
+                                PythonBridge.checkDependenciesParsed()
                             }
                         }
 
@@ -711,6 +719,28 @@ class MainActivity : AppCompatActivity() {
         if (!PythonBridge.isReady()) {
             showLog("Python runtime not available.\n", LogLevel.ERROR)
             showLog("Restart the app to retry initialization.\n\n", LogLevel.WARN)
+            return
+        }
+
+        // Pre-repack dependency check: validate that required modules
+        // (hashlib) and selected compression are available on this device.
+        // Uses cached result from initialization to avoid blocking the UI.
+        val depCheck = cachedDepCheck
+        if (depCheck == null || !depCheck.allOk) {
+            showLog("Cannot start repack: required modules missing.\n", LogLevel.ERROR)
+            if (depCheck?.missing?.contains("hashlib") == true) {
+                showLog("  hashlib is broken — SHA-256 integrity check not possible.\n", LogLevel.ERROR)
+            }
+            if (depCheck?.missing?.contains("bz2") == true) {
+                showLog("  bz2 is not available.\n", LogLevel.WARN)
+            }
+            showLog("  This device may not support the required native libraries.\n", LogLevel.WARN)
+            showLog("  Recommended: use a device with arm64-v8a architecture.\n\n", LogLevel.WARN)
+            return
+        }
+        if (selectedCompression !in depCheck.availableCompression) {
+            showLog("Cannot start repack: compression '$selectedCompression' is not available.\n", LogLevel.ERROR)
+            showLog("  Available: ${depCheck.availableCompression.joinToString(", ")}\n\n", LogLevel.INFO)
             return
         }
 

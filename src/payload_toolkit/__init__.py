@@ -94,40 +94,70 @@ def check_dependencies():
         "missing": [],
         "optional": [],
         "available": [],
-        "compression": ["none", "gzip", "bzip2"],
+        # Start with only truly universal algorithms; add others based on tests
+        "compression": ["none", "gzip"],
         "python_ver": _sys.version,
         "platform": _sys.platform,
     }
 
-    # Required stdlib C extensions
-    required = {
-        "hashlib": "SHA-256 hashing (stdlib C ext)",
-        "bz2": "bzip2 compression (stdlib C ext)",
-    }
-    # Optional stdlib / third-party extensions
-    optional = {
-        "lzma": "XZ/LZMA compression (stdlib C ext, needs liblzma)",
-        "brotli": "brotli compression (pip install brotli)",
-    }
+    # --- hashlib: test actual functionality, not just importability ---
+    # On some Android devices, the hashlib module loads but all algorithms
+    # fail because _hashlib.so cannot find libcrypto.so.  A simple
+    # __import__("hashlib") succeeds, but hashlib.sha256() would raise.
+    # We must verify by calling an actual hash function.
+    try:
+        import hashlib as _hl
+        _test_hash = _hl.sha256(b"probe").hexdigest()
+        if len(_test_hash) == 64:
+            results["available"].append("hashlib")
+        else:
+            raise ValueError("sha256 produced wrong length")
+    except Exception:
+        results["missing"].append("hashlib")
+        results["all_ok"] = False
 
-    for mod_name, _desc in required.items():
-        try:
-            __import__(mod_name)
-            results["available"].append(mod_name)
-        except ImportError:
-            results["missing"].append(mod_name)
-            results["all_ok"] = False
+    # --- bz2: test actual compression, not just importability ---
+    try:
+        import bz2 as _bz2_mod
+        _bz2_mod.compress(b"probe")
+        results["available"].append("bz2")
+        results["compression"].append("bzip2")
+    except Exception:
+        results["missing"].append("bz2")
+        results["all_ok"] = False
 
-    for mod_name, _desc in optional.items():
-        try:
-            __import__(mod_name)
-            results["available"].append(mod_name)
-            if mod_name == "lzma":
-                results["compression"].append("xz")
-            elif mod_name == "brotli":
-                results["compression"].append("brotli")
-        except ImportError:
-            results["optional"].append(mod_name)
+    # --- gzip: test actual compression ---
+    # gzip is usually pure-Python + zlib C ext; test to be safe.
+    try:
+        import gzip as _gz_mod
+        import io as _io
+        _buf = _io.BytesIO()
+        with _gz_mod.GzipFile(fileobj=_buf, mode="wb") as _f:
+            _f.write(b"probe")
+        results["available"].append("gzip")
+    except Exception:
+        # gzip failed — remove from compression list
+        if "gzip" in results["compression"]:
+            results["compression"].remove("gzip")
+        results["optional"].append("gzip")
+
+    # --- lzma: optional, test actual compression ---
+    try:
+        import lzma as _lzma_mod
+        _lzma_mod.compress(b"probe", format=_lzma_mod.FORMAT_XZ)
+        results["available"].append("lzma")
+        results["compression"].append("xz")
+    except Exception:
+        results["optional"].append("lzma")
+
+    # --- brotli: optional, test actual compression ---
+    try:
+        import brotli as _br_mod
+        _br_mod.compress(b"probe")
+        results["available"].append("brotli")
+        results["compression"].append("brotli")
+    except Exception:
+        results["optional"].append("brotli")
 
     return results
 
@@ -162,7 +192,16 @@ def check_dependencies_text():
     else:
         lines.append("Status: INCOMPLETE - some required modules missing")
         lines.append("")
+        if "hashlib" in info["missing"]:
+            lines.append("  hashlib is broken: native .so or libcrypto.so.3 not found.")
+            lines.append("  This usually means the device ABI is not supported.")
+            lines.append("  Repack requires hashlib for SHA-256 integrity verification.")
+            lines.append("")
+        if "bz2" in info["missing"]:
+            lines.append("  bz2 is unavailable: libbz2.so not found.")
+            lines.append("")
         lines.append("Fix: On Termux run:  pkg install python")
+        lines.append("     Or use a device with arm64-v8a architecture.")
 
     return "\n".join(lines)
 

@@ -919,6 +919,48 @@ object PythonBridge {
         }
     }
 
+    /**
+     * Parsed dependency check result for pre-repack validation.
+     */
+    data class DepCheckResult(
+        val allOk: Boolean,
+        val missing: List<String>,
+        val availableCompression: List<String>
+    )
+
+    /**
+     * Run --check-deps and parse the output into a structured result.
+     * Used by UI to validate before allowing repack.
+     */
+    fun checkDependenciesParsed(): DepCheckResult {
+        if (!initialized) return DepCheckResult(false, listOf("python"), emptyList())
+
+        val output = checkDependencies()
+        var allOk = false
+        val missing = mutableListOf<String>()
+        val availableCompression = mutableListOf<String>()
+
+        for (line in output.lines()) {
+            val trimmed = line.trim()
+            if (trimmed == "Status: OK - all required dependencies available") {
+                allOk = true
+            }
+            // Parse MISSING (required) entries
+            if (trimmed.startsWith("[!]")) {
+                missing.add(trimmed.removePrefix("[!] ").trim())
+            }
+        }
+
+        // Parse compression line: "Compression: none, gzip, bzip2"
+        val compLine = output.lines().find { it.trim().startsWith("Compression:") }
+        if (compLine != null) {
+            val comps = compLine.substringAfter(":").split(",").map { it.trim() }
+            availableCompression.addAll(comps)
+        }
+
+        return DepCheckResult(allOk, missing, availableCompression)
+    }
+
     fun isTermuxInstalled(): Boolean {
         return SYSTEM_PYTHON_PATHS.any { it.contains("termux") && File(it).exists() }
     }

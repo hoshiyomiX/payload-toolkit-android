@@ -18,10 +18,18 @@ The compression algorithm is determined by the InstallOperation type:
     DISCARD (22)          →  "none" (no data)
 """
 
-import bz2
 import gzip
 import io
 import sys
+
+# Import bz2 only if available; requires libbz2 on the system.
+# On Android (bundled Python), libbz2.so.1.0.8 must be in nativeLibraryDir.
+try:
+    import bz2 as _bz2_mod
+    _HAS_BZ2 = True
+except ImportError:
+    _bz2_mod = None
+    _HAS_BZ2 = False
 
 # Import lzma only if available; requires liblzma on the system.
 # On Termux: liblzma is included with 'pkg install python'.
@@ -125,7 +133,12 @@ def compress(data, algorithm="gzip", level=None):
     level = max(rng[0], min(rng[1], int(level)))
 
     if alg == ALG_BZIP2:
-        return bz2.compress(data, compresslevel=level)
+        if not _HAS_BZ2:
+            raise RuntimeError(
+                "bzip2 compression requires the 'bz2' module (libbz2).  "
+                "On Android: ensure libbz2.so is in nativeLibraryDir."
+            )
+        return _bz2_mod.compress(data, compresslevel=level)
 
     if alg == ALG_GZIP:
         buf = io.BytesIO()
@@ -209,7 +222,12 @@ def compress_streaming(data, algorithm="gzip", level=None, chunk_size=1 << 20,
 
     # -- Bzip2: incremental via bz2.BZ2Compressor --
     if alg == ALG_BZIP2:
-        comp = bz2.BZ2Compressor(compresslevel=level)
+        if not _HAS_BZ2:
+            raise RuntimeError(
+                "bzip2 compression requires the 'bz2' module (libbz2).  "
+                "On Android: ensure libbz2.so is in nativeLibraryDir."
+            )
+        comp = _bz2_mod.BZ2Compressor(compresslevel=level)
         offset = 0
         while offset < total:
             chunk = data[offset:offset + chunk_size]
@@ -314,7 +332,11 @@ def decompress(data, algorithm="auto"):
         return data
 
     if alg == ALG_BZIP2:
-        return bz2.decompress(data)
+        if not _HAS_BZ2:
+            raise RuntimeError(
+                "bzip2 decompression requires the 'bz2' module (libbz2)."
+            )
+        return _bz2_mod.decompress(data)
 
     if alg == ALG_GZIP:
         buf = io.BytesIO(data)
@@ -403,6 +425,11 @@ def operation_type_for_algorithm(algorithm):
         ALG_BROTLI: 23,    # BROTLI_BZ
     }
     return mapping.get(alg, 0)
+
+
+def is_bz2_available():
+    """Return True if the bz2 module is importable."""
+    return _HAS_BZ2
 
 
 def is_brotli_available():

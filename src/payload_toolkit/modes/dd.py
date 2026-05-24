@@ -24,13 +24,23 @@ Compress IDs (stored in header + used by flasher):
     0 = none,  1 = gzip,  2 = bzip2,  3 = xz,  4 = brotli
 """
 
-import hashlib
 import io
 import os
 import struct
 import tempfile
 import time
 import zipfile
+
+# hashlib is required for SHA-256 integrity verification in ddbundle.
+# On some Android devices, the module loads but algorithms are broken.
+# Import early and provide a clear error if unavailable.
+try:
+    import hashlib as _hashlib_mod
+    _hashlib_mod.sha256(b"probe").hexdigest()  # verify it actually works
+    _HAS_HASHLIB = True
+except Exception:
+    _hashlib_mod = None
+    _HAS_HASHLIB = False
 
 from .. import _report_progress
 from ..compression import compress, compress_streaming, DEFAULT_LEVELS
@@ -625,6 +635,16 @@ def run(*args, **kwargs):
         return {"success": False, "output": "[!] Error: output_path is required",
                 "error": "output_path is required"}
 
+    # ── Check hashlib availability ──
+    # SHA-256 is required for partition integrity verification in the bundle.
+    if not _HAS_HASHLIB:
+        return {"success": False,
+                "output": "[!] Error: hashlib is not available or broken on this device.\n"
+                          "  SHA-256 hashing is required for ddbundle integrity.\n"
+                          "  This usually means native .so files are missing for this device ABI.\n"
+                          "  Recommended: use a device with arm64-v8a architecture.",
+                "error": "hashlib not available"}
+
     if isinstance(images, dict):
         images = {str(k): str(v) for k, v in images.items()}
 
@@ -693,7 +713,7 @@ def run(*args, **kwargs):
             _report_progress(1 + i, total_steps, f"Compressing {name}", percent=0)
 
             # Stream-read file: hash while reading to avoid double pass
-            sha = hashlib.sha256()
+            sha = _hashlib_mod.sha256()
             raw_chunks = []
             with open(path, "rb") as f:
                 while True:
