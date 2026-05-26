@@ -31,9 +31,10 @@ import tempfile
 import time
 import zipfile
 
-# hashlib is required for SHA-256 integrity verification in ddbundle.
-# On some Android devices, the module loads but algorithms are broken.
-# Import early and provide a clear error if unavailable.
+# hashlib is required for SHA-256 integrity verification in otaku.
+# On some Android devices (especially arm64-v8a), the _hashlib.so module
+# may be removed during build by DT_NEEDED resolution.  The compression
+# module provides a pure-Python SHA-256 fallback in that case.
 try:
     import hashlib as _hashlib_mod
     _hashlib_mod.sha256(b"probe").hexdigest()  # verify it actually works
@@ -635,15 +636,14 @@ def run(*args, **kwargs):
         return {"success": False, "output": "[!] Error: output_path is required",
                 "error": "output_path is required"}
 
-    # ── Check hashlib availability ──
-    # SHA-256 is required for partition integrity verification in the bundle.
+    # ── Check hashlib availability (non-fatal) ──
+    # SHA-256 is used for partition integrity verification in the bundle.
+    # If C hashlib is unavailable, compression.py uses a pure-Python fallback.
+    # We warn but don't block — the repack will work either way.
     if not _HAS_HASHLIB:
-        return {"success": False,
-                "output": "[!] Error: hashlib is not available or broken on this device.\n"
-                          "  SHA-256 hashing is required for ddbundle integrity.\n"
-                          "  This usually means native .so files are missing for this device ABI.\n"
-                          "  Recommended: use a device with arm64-v8a architecture.",
-                "error": "hashlib not available"}
+        lines.append("  [!] WARNING: hashlib C extension unavailable.")
+        lines.append("      SHA-256 will use pure-Python fallback (slower for large images).")
+        lines.append("")
 
     if isinstance(images, dict):
         images = {str(k): str(v) for k, v in images.items()}

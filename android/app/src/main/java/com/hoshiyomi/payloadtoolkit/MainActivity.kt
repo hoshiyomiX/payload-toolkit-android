@@ -734,21 +734,21 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // Pre-repack dependency check: validate that required modules
-        // (hashlib) and selected compression are available on this device.
+        // Pre-repack dependency check: validate selected compression is available.
         // Uses cached result from initialization to avoid blocking the UI.
+        // Note: hashlib and bz2 are non-blocking — compression.py provides a
+        // pure-Python SHA-256 fallback, and bz2 is optional (use gzip/xz/brotli).
         val depCheck = cachedDepCheck
-        if (depCheck == null || !depCheck.allOk) {
-            showLog("Cannot start repack: required modules missing.\n", LogLevel.ERROR)
-            if (depCheck?.missing?.contains("hashlib") == true) {
-                showLog("  hashlib is broken — SHA-256 integrity check not possible.\n", LogLevel.ERROR)
-            }
-            if (depCheck?.missing?.contains("bz2") == true) {
-                showLog("  bz2 is not available.\n", LogLevel.WARN)
-            }
-            showLog("  This device may not support the required native libraries.\n", LogLevel.WARN)
-            showLog("  Recommended: use a device with arm64-v8a architecture.\n\n", LogLevel.WARN)
+        if (depCheck == null) {
+            showLog("Python runtime not ready. Restart the app.\n\n", LogHelper.LogLevel.ERROR)
             return
+        }
+        // Show informational warnings for missing modules (don't block repack).
+        if (depCheck.missing.contains("hashlib")) {
+            showLog("[!] hashlib C extension unavailable — using pure-Python SHA-256 fallback.\n", LogHelper.LogLevel.WARN)
+        }
+        if (depCheck.missing.contains("bz2")) {
+            showLog("[!] bz2 unavailable — bzip2 compression disabled.\n", LogHelper.LogLevel.WARN)
         }
         if (selectedCompression !in depCheck.availableCompression) {
             showLog("Cannot start repack: compression '$selectedCompression' is not available.\n", LogLevel.ERROR)

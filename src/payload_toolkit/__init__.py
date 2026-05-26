@@ -123,8 +123,9 @@ def check_dependencies():
         results["available"].append("bz2")
         results["compression"].append("bzip2")
     except Exception:
+        # bz2 is optional — bzip2 is just one of several compression options.
+        # Don't set all_ok=False; the user can use gzip, xz, or brotli instead.
         results["missing"].append("bz2")
-        results["all_ok"] = False
 
     # --- gzip: test actual compression ---
     # gzip is usually pure-Python + zlib C ext; test to be safe.
@@ -194,11 +195,7 @@ def check_dependencies_text():
         lines.append("")
         if "hashlib" in info["missing"]:
             lines.append("  hashlib is broken: native .so or libcrypto.so.3 not found.")
-            lines.append("  This usually means the device ABI is not supported.")
-            lines.append("  Repack requires hashlib for SHA-256 integrity verification.")
-            lines.append("")
-        if "bz2" in info["missing"]:
-            lines.append("  bz2 is unavailable: libbz2.so not found.")
+            lines.append("  SHA-256 integrity will use pure-Python fallback (slower).")
             lines.append("")
         lines.append("Fix: On Termux run:  pkg install python")
         lines.append("     Or use a device with arm64-v8a architecture.")

@@ -392,8 +392,42 @@ print(fix_needed_all('$so_file', '$JNI_DIR'))")
     # =====================================================================
     #  4. Validate DT_NEEDED resolution — remove broken .so files
     # =====================================================================
+    # Extension modules (from lib-dynload/) that start with "_" are
+    # Python C extensions.  Their DT_NEEDED may reference versioned libs
+    # that the linker resolves at runtime via LD_PRELOAD.  On arm64-v8a,
+    # the SONAME patching sometimes fails to create the correct unversioned
+    # symlink, causing these extensions to be falsely removed.
+    # Skip removal for these protected extension modules.
+    PROTECTED_EXTENSIONS=(
+        "_hashlib.so"
+        "_bz2.so"
+        "_lzma.so"
+        "_sha256.so"
+        "_sha1.so"
+        "_sha512.so"
+        "_md5.so"
+        "_socket.so"
+        "_struct.so"
+        "_array.so"
+        "_codecs_cn.so"
+        "_codecs_hk.so"
+        "_codecs_iso2022.so"
+        "_codecs_jp.so"
+        "_codecs_kr.so"
+        "_codecs_tw.so"
+        "_multibytecodec.so"
+    )
+    _is_protected() {
+        local name="$1"
+        for p in "${PROTECTED_EXTENSIONS[@]}"; do
+            [ "$name" = "$p" ] && return 0
+        done
+        return 1
+    }
+
     echo "    Validating DT_NEEDED resolution..."
     REMOVED_BROKEN=0
+    PROTECTED_SKIPPED=0
     CHANGED=1
     ITERATION=0
     while [ "$CHANGED" -eq 1 ]; do
@@ -425,14 +459,20 @@ print(fix_needed_all('$so_file', '$JNI_DIR'))")
                 continue
             fi
             if [ "$has_broken" -eq 1 ]; then
-                echo "      REMOVE $(basename "$so_file"): unresolvable:$broken_list"
-                rm -f "$so_file"
-                REMOVED_BROKEN=$((REMOVED_BROKEN + 1))
-                CHANGED=1
+                if _is_protected "$(basename "$so_file")"; then
+                    echo "      SKIP $(basename "$so_file"): protected extension (deps may resolve at runtime)$broken_list"
+                    PROTECTED_SKIPPED=$((PROTECTED_SKIPPED + 1))
+                else
+                    echo "      REMOVE $(basename "$so_file"): unresolvable:$broken_list"
+                    rm -f "$so_file"
+                    REMOVED_BROKEN=$((REMOVED_BROKEN + 1))
+                    CHANGED=1
+                fi
             fi
         done
     done
     echo "    Removed $REMOVED_BROKEN .so files with broken deps ($ITERATION passes)"
+    [ "$PROTECTED_SKIPPED" -gt 0 ] && echo "    Protected $PROTECTED_SKIPPED extension modules from removal"
 
     # -- Verify critical files exist ----------------------------------------
     if [ ! -f "$JNI_DIR/libpython3exec.so" ]; then
@@ -447,6 +487,9 @@ print(fix_needed_all('$so_file', '$JNI_DIR'))")
         "libandroid-support.so"
         "libpython3.13.so"
         "libz.so"
+        "libcrypto.so"
+        "libbz2.so"
+        "liblzma.so"
     )
     for lib in "${CRITICAL_LIBS[@]}"; do
         if [ ! -f "$JNI_DIR/$lib" ]; then
