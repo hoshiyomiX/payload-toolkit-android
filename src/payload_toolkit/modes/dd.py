@@ -641,8 +641,7 @@ def run(*args, **kwargs):
     # If C hashlib is unavailable, compression.py uses a pure-Python fallback.
     # We warn but don't block — the repack will work either way.
     if not _HAS_HASHLIB:
-        lines.append("  [!] WARNING: hashlib C extension unavailable.")
-        lines.append("      SHA-256 will use pure-Python fallback (slower for large images).")
+        lines.append("  ! hashlib C extension unavailable. Using pure-Python SHA-256 fallback.")
         lines.append("")
 
     if isinstance(images, dict):
@@ -677,13 +676,8 @@ def run(*args, **kwargs):
             pass  # Non-critical: some Android builds restrict nice()
 
         # ── Header ──
-        lines.append("\u2550" * 50)
-        lines.append("  OTAku Repacker")
-        lines.append(f"  {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        lines.append("\u2550" * 50)
-        lines.append("")
+        lines.append(f"\u2550 OTAku  {time.strftime('%H:%M:%S')} \u2550")
         lines.append(f"  Partitions  : {', '.join(sorted(images.keys()))}")
-        level_display = f" (level {level})"
         lines.append(f"  Compression : {compress_name}{level_display}")
         if skip_verify:
             lines.append(f"  Verify      : disabled")
@@ -693,13 +687,12 @@ def run(*args, **kwargs):
 
         # ── Step 1: Build otaku.bin ──
         _report_progress(1, total_steps, "Building otaku.bin", percent=0)
-        lines.append(f"[Step 1] Building otaku.bin")
-        lines.append(f"  Compressing {num_parts} partition(s) with {compress_name}{level_display}...")
+        lines.append("[1/3] Building otaku.bin")
+        lines.append(f"  Compressing {num_parts} partition(s) with {compress_name}{level_display}")
 
         # Warn about high compression levels on mobile
         if compress_alg in ("xz", "brotli") and level and level >= 7:
-            lines.append(f"  [!] WARNING: {compress_name} level {level} is very slow on Android.")
-            lines.append(f"      Level 6 is recommended for a good size/speed balance.")
+            lines.append(f"  ! {compress_name} level {level} is very slow on mobile. Level 6 recommended.")
 
         header = _build_header(compress_id, num_parts)
 
@@ -764,12 +757,12 @@ def run(*args, **kwargs):
 
         bundle_data = header + data_blobs
         bundle_size = len(bundle_data)
-        lines.append(f"  Bundle size : {_human_size(bundle_size)}")
+        lines.append(f"  Bundle size  : {_human_size(bundle_size)}")
         lines.append("")
 
         # ── Step 2: Build flasher scripts ──
         _report_progress(1 + num_parts, total_steps, "Building flasher scripts", percent=0)
-        lines.append("[Step 2] Building flasher scripts")
+        lines.append("[2/3] Building flasher scripts")
 
         update_binary = _build_update_script(
             num_parts, compress_id, compress_name, partitions_meta,
@@ -781,13 +774,13 @@ def run(*args, **kwargs):
             device=device, level=level, skip_verify=skip_verify
         )
 
-        lines.append(f"  update-binary   : {len(update_binary):,} bytes")
-        lines.append(f"  flash_info.txt  : {len(flash_info):,} bytes")
+        lines.append(f"  update-binary : {len(update_binary):,} bytes")
+        lines.append(f"  flash_info.txt : {len(flash_info):,} bytes")
         lines.append("")
 
         # ── Step 3: Write output ZIP ──
         _report_progress(2 + num_parts, total_steps, "Writing output ZIP", percent=0)
-        lines.append(f"[Step 3] Writing {os.path.basename(output_path)}")
+        lines.append(f"[3/3] Writing {os.path.basename(output_path)}")
 
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
@@ -824,16 +817,14 @@ def run(*args, **kwargs):
                 pass
 
         zip_size = os.path.getsize(output_path)
-        lines.append(f"  ZIP size     : {_human_size(zip_size)}")
+        lines.append(f"  ZIP size      : {_human_size(zip_size)}")
         lines.append("")
 
         # ── Summary ──
         elapsed = time.time() - t0
-        lines.append("\u2550" * 50)
-        lines.append(f"  Done in {elapsed:.1f}s")
+        lines.append(f"\u2550 Done in {elapsed:.1f}s \u2550")
         lines.append(f"  Output  : {output_path}")
         lines.append(f"  ZIP size: {_human_size(zip_size)}")
-        lines.append("\u2550" * 50)
 
         output = "\n".join(lines)
         print(output)

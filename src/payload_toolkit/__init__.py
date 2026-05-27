@@ -167,38 +167,38 @@ def check_dependencies_text():
     """Return a human-readable dependency report as a string."""
     info = check_dependencies()
     lines = []
-    lines.append("payload_toolkit v%s" % __version__)
-    lines.append("Python: %s" % info["python_ver"].split("\n")[0])
-    lines.append("Platform: %s" % info["platform"])
+    lines.append(f"payload_toolkit v{__version__}")
+    lines.append(f"Python: {info['python_ver'].split(chr(10))[0]}")
+    lines.append(f"Platform: {info['platform']}")
     lines.append("")
 
     if info["missing"]:
-        lines.append("MISSING (required):")
+        lines.append("Missing (required):")
         for m in info["missing"]:
-            lines.append("  [!] %s" % m)
+            lines.append(f"  ! {m}")
         lines.append("")
 
     if info["optional"]:
-        lines.append("MISSING (optional):")
+        lines.append("Missing (optional):")
         for m in info["optional"]:
-            lines.append("  [-] %s" % m)
+            lines.append(f"  - {m}")
         lines.append("")
 
-    lines.append("Available: %s" % ", ".join(info["available"]) if info["available"] else "Available: (none)")
-    lines.append("Compression: %s" % ", ".join(info["compression"]))
+    lines.append(f"Available: {', '.join(info['available']) if info['available'] else '(none)'}")
+    lines.append(f"Compression: {', '.join(info['compression'])}")
     lines.append("")
 
     if info["all_ok"]:
-        lines.append("Status: OK - all required dependencies available")
+        lines.append("Status: OK — all dependencies available")
     else:
-        lines.append("Status: INCOMPLETE - some required modules missing")
+        lines.append("Status: INCOMPLETE — some modules missing")
         lines.append("")
         if "hashlib" in info["missing"]:
-            lines.append("  hashlib is broken: native .so or libcrypto.so.3 not found.")
-            lines.append("  SHA-256 integrity will use pure-Python fallback (slower).")
+            lines.append("  hashlib broken: native .so or libcrypto not found.")
+            lines.append("  SHA-256 will use pure-Python fallback (slower).")
             lines.append("")
-        lines.append("Fix: On Termux run:  pkg install python")
-        lines.append("     Or use a device with arm64-v8a architecture.")
+        lines.append("  Fix: pkg install python (Termux)")
+        lines.append("   Or: use a device with arm64-v8a architecture.")
 
     return "\n".join(lines)
 

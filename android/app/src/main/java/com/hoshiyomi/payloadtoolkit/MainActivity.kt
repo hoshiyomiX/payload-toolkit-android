@@ -202,7 +202,7 @@ class MainActivity : AppCompatActivity() {
     ) { permissions ->
         val allGranted = permissions.entries.all { it.value }
         if (!allGranted) {
-            showLog("Some permissions were denied. File access may be limited.\n", LogLevel.WARN)
+            showLog("Some permissions were denied. File access may be limited.", LogLevel.WARN)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (!Environment.isExternalStorageManager()) {
@@ -249,7 +249,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun initializePython() {
         lifecycleScope.launch {
-            showLog("Initializing OTAku...\n", LogLevel.INFO)
+            showLog("Initializing OTAku...", LogLevel.INFO)
             withContext(Dispatchers.IO) {
                 val result = PythonBridge.ensureInitialized(this@MainActivity)
                 withContext(Dispatchers.Main) {
@@ -267,20 +267,20 @@ class MainActivity : AppCompatActivity() {
                             } catch (_: Exception) { "unknown" }
                         }
                         val source = if (result.isBundled) "bundled" else "system"
-                        showLog("Python runtime: $pyVer ($source)\n", LogLevel.INFO)
+                        showLog("Python runtime: $pyVer ($source)")
 
                         lifecycleScope.launch {
                             val ptVer = withContext(Dispatchers.IO) {
                                 PayloadBridge.getPyzVersion()
                             }
-                            if (ptVer != null) showLog("payload_toolkit $ptVer loaded\n", LogLevel.INFO)
+                            if (ptVer != null) showLog("payload_toolkit $ptVer loaded")
 
                             // Run dependency health check
                             val depReport = withContext(Dispatchers.IO) {
                                 PythonBridge.checkDependencies()
                             }
                             if (depReport.isNotBlank()) {
-                                showLog(depReport + "\n")
+                                showLog(depReport)
                             }
                             // Cache parsed result for pre-repack validation
                             cachedDepCheck = withContext(Dispatchers.IO) {
@@ -288,20 +288,20 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
 
-                        showLog("\u2550".repeat(50) + "\n\n")
+                        showLog("═".repeat(50))
                     } else {
-                        showLog("Initialization failed: ${result.error}\n", LogLevel.ERROR)
+                        showLog("Initialization failed: ${result.error}", LogLevel.ERROR)
                         // Show detailed diagnostics so the user can report them
                         if (result.diagnostics.isNotBlank()) {
-                            showLog("[Diagnostics]\n")
+                            showLog("[Diagnostics]")
                             showLog(result.diagnostics)
-                            showLog("\u2550".repeat(50) + "\n\n")
+                            showLog("═".repeat(50))
                         }
-                        showLog("Possible causes:\n")
-                        showLog("  - APK installed from an old build (before v3.0)\n")
-                        showLog("  - App installed but native libs extraction failed\n")
-                        showLog("  - Try: Uninstall -> Re-download latest APK -> Install\n")
-                        showLog("\u2550".repeat(50) + "\n\n")
+                        showLog("Possible causes:")
+                        showLog("  - APK installed from an old build (before v3.0)")
+                        showLog("  - App installed but native libs extraction failed")
+                        showLog("  - Try: Uninstall > Re-download latest APK > Install")
+                        showLog("═".repeat(50))
                     }
                 }
             }
@@ -408,7 +408,7 @@ class MainActivity : AppCompatActivity() {
             editDevice?.setText(deviceName)
             prefs.edit { putString("device", deviceName) }
             updateOutputPreview()
-            showLog("Auto-detected device: $deviceName\n", LogLevel.INFO)
+            showLog("Auto-detected device: $deviceName")
         }
     }
 
@@ -535,7 +535,7 @@ class MainActivity : AppCompatActivity() {
             copyPendingRemovals()
             updateImageListUI()
             updateOutputPreview()
-            showLog("All images removed.\n", LogLevel.INFO)
+            showLog("All images removed.")
         }
 
         findViewById<View>(R.id.buttonExecute).setOnClickListener {
@@ -620,7 +620,7 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             findViewById<android.widget.EditText>(R.id.editTextOutput)
                 .setText(resolvedPath)
-            showLog("Output directory: $resolvedPath\n", LogLevel.INFO)
+            showLog("Output directory: $resolvedPath")
             updateOutputPreview()
         }
     }
@@ -664,7 +664,7 @@ class MainActivity : AppCompatActivity() {
 
                 // Skip if already added
                 if (imageFiles.any { it.first == partitionName }) {
-                    showLog("$partitionName already added, skipping.\n", LogLevel.WARN)
+                    showLog("$partitionName already added, skipping.", LogLevel.WARN)
                     continue
                 }
 
@@ -735,13 +735,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun onRepackClicked() {
         if (isRepacking) {
-            showLog("Operation already in progress. Please wait.\n", LogLevel.WARN)
+            showLog("Operation already in progress. Please wait.", LogLevel.WARN)
             return
         }
 
         if (!PythonBridge.isReady()) {
-            showLog("Python runtime not available.\n", LogLevel.ERROR)
-            showLog("Restart the app to retry initialization.\n\n", LogLevel.WARN)
+            showLog("Python runtime not available.", LogLevel.ERROR)
+            showLog("Restart the app to retry initialization.", LogLevel.WARN)
             return
         }
 
@@ -751,19 +751,19 @@ class MainActivity : AppCompatActivity() {
         // pure-Python SHA-256 fallback, and bz2 is optional (use gzip/xz/brotli).
         val depCheck = cachedDepCheck
         if (depCheck == null) {
-            showLog("Python runtime not ready. Restart the app.\n\n", LogLevel.ERROR)
+            showLog("Python runtime not ready. Restart the app.", LogLevel.ERROR)
             return
         }
         // Show informational warnings for missing modules (don't block repack).
         if (depCheck.missing.contains("hashlib")) {
-            showLog("[!] hashlib C extension unavailable — using pure-Python SHA-256 fallback.\n", LogLevel.WARN)
+            showLog("hashlib C extension unavailable — using pure-Python SHA-256 fallback.", LogLevel.WARN)
         }
         if (depCheck.missing.contains("bz2")) {
-            showLog("[!] bz2 unavailable — bzip2 compression disabled.\n", LogLevel.WARN)
+            showLog("bz2 unavailable — bzip2 compression disabled.", LogLevel.WARN)
         }
         if (selectedCompression !in depCheck.availableCompression) {
-            showLog("Cannot start repack: compression '$selectedCompression' is not available.\n", LogLevel.ERROR)
-            showLog("  Available: ${depCheck.availableCompression.joinToString(", ")}\n\n", LogLevel.INFO)
+            showLog("Cannot start repack: compression '$selectedCompression' is not available.", LogLevel.ERROR)
+            showLog("  Available: ${depCheck.availableCompression.joinToString(", ")}", LogLevel.INFO)
             return
         }
 
@@ -896,7 +896,7 @@ class MainActivity : AppCompatActivity() {
                             // Log only when percent changes
                             if (progress.percent != lastProgressPercent) {
                                 lastProgressPercent = progress.percent
-                                current.showLog("[PROGRESS] ${progress.message} — ${progress.percent}%\n", LogLevel.PLAIN)
+                                current.showLog("${progress.message} ${progress.percent}%")
                             }
                         }
                     },
@@ -904,7 +904,7 @@ class MainActivity : AppCompatActivity() {
                         // Stream Python stdout to log in real-time
                         val current = activityRef?.get()
                         if (current != null && !current.isFinishing && !current.isDestroyed) {
-                            current.showLog("$line\n")
+                            current.showLog(line)
                         }
                     }
                 )
@@ -925,8 +925,8 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 val current = activityRef?.get()
                 if (current != null && !current.isFinishing && !current.isDestroyed) {
-                    current.showLog("[ERROR] Repack failed: ${e.message}\n", LogLevel.ERROR)
-                    current.showLog("[INFO] Check logcat for details.\n", LogLevel.WARN)
+                    current.showLog("Repack failed: ${e.message}", LogLevel.ERROR)
+                    current.showLog("Check logcat for details.", LogLevel.WARN)
                 }
                 showCompletionNotification(false, "${e.message}")
             } finally {
@@ -956,7 +956,7 @@ class MainActivity : AppCompatActivity() {
                 else "${durationMs / 60000}m ${durationMs % 60000 / 1000}s"
             showCompletionNotification(true, "Completed in $duration")
         } else {
-            showLog("[ERROR] ${error ?: "Unknown error"}\n", LogLevel.ERROR)
+            showLog("${error ?: "Unknown error"}", LogLevel.ERROR)
             showCompletionNotification(false, error ?: "Unknown error")
         }
     }
@@ -1038,15 +1038,15 @@ class MainActivity : AppCompatActivity() {
                 isRepacking = false
                 isExecuting = false
                 cancelRepackNotification()
-                showLog("\n[ERROR] Repack was interrupted — process killed (idle timeout).\n", LogLevel.ERROR)
-                showLog("The device may have entered Doze mode and killed the background process.\n", LogLevel.WARN)
-                showLog("Tip: go to Settings → Apps → OTAku → Battery → Unrestricted.\n", LogLevel.INFO)
+                showLog("\nRepack was interrupted — process killed (idle timeout).", LogLevel.ERROR)
+                showLog("The device may have entered Doze mode and killed the background process.", LogLevel.WARN)
+                showLog("Tip: go to Settings > Apps > OTAku > Battery > Unrestricted.")
                 setUIExecuting(false)
             } else {
                 // Process still alive — reconnect UI
                 isExecuting = true
                 setUIExecuting(true)
-                showLog("[INFO] Repack in progress (returned from background)\n", LogLevel.INFO)
+                showLog("Repack in progress (returned from background).")
                 // Re-create split progress bars with current state
                 if (partitionCount > 0) {
                     val savedProgress = partitionProgress.copyOf()
@@ -1186,17 +1186,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showLog(text: String, level: LogLevel = LogLevel.PLAIN) {
+        val line = if (text.endsWith("\n")) text else "$text\n"
         // Persist to companion object (survives Activity recreation)
-        savedLogText.append(text)
+        savedLogText.append(line)
 
         runOnUiThread {
             val textView = findViewById<android.widget.TextView>(R.id.textViewLog) ?: return@runOnUiThread
 
             if (level == LogLevel.PLAIN) {
-                textView.append(text)
+                textView.append(line)
             } else {
                 val prefix = "[${level.tag}] "
-                val colored = SpannableString("$prefix$text")
+                val colored = SpannableString("$prefix$line")
                 try {
                     colored.setSpan(
                         ForegroundColorSpan(ContextCompat.getColor(this, level.colorRes)),
