@@ -1,5 +1,5 @@
 """
-modes/dd.py — Generate a nukecodes-format flashable ZIP from partition images.
+modes/dd.py — Generate a otaku-format flashable ZIP from partition images.
 
 Called from Kotlin via Chaquopy:
     payload_toolkit.modes.dd.run(
@@ -11,8 +11,8 @@ Called from Kotlin via Chaquopy:
         skip_verify=False,
     )
 
-nukecodes format:
-    nukecodes.bin — DDBU header (4096 bytes, padded) + compressed partition data
+otaku format:
+    otaku.bin — DDBU header (4096 bytes, padded) + compressed partition data
                     Header: magic "DDBU" (4B) + version (u16) + compress_id (u16)
                           + num_parts (u16) + header_size (u16) + padding to 4096
                     Data:   each partition compressed, padded to 4096 alignment
@@ -31,7 +31,7 @@ import tempfile
 import time
 import zipfile
 
-# hashlib is required for SHA-256 integrity verification in nukecodes.
+# hashlib is required for SHA-256 integrity verification in otaku.
 # On some Android devices (especially arm64-v8a), the _hashlib.so module
 # may be removed during build by DT_NEEDED resolution.  The compression
 # module provides a pure-Python SHA-256 fallback in that case.
@@ -53,7 +53,7 @@ DDBUNDLE_VERSION = 1
 HEADER_SIZE = 4096          # Fixed header allocation (padded)
 ALIGN = 4096
 
-# Compress algorithm -> nukecodes numeric ID
+# Compress algorithm -> otaku numeric ID
 COMPRESS_ID_MAP = {
     "none": 0,
     "gzip": 1,
@@ -62,7 +62,7 @@ COMPRESS_ID_MAP = {
     "brotli": 4,
 }
 
-# nukecodes numeric ID -> shell decompressor command
+# otaku numeric ID -> shell decompressor command
 COMPRESS_CMD_MAP = {
     0: "cat",
     1: "gzip",
@@ -71,7 +71,7 @@ COMPRESS_CMD_MAP = {
     4: "brotli",
 }
 
-# nukecodes numeric ID -> file extension for temp files
+# otaku numeric ID -> file extension for temp files
 COMPRESS_EXT_MAP = {
     0: ".raw",
     1: ".gz",
@@ -108,7 +108,7 @@ def _human_size(size_bytes):
 
 
 def _build_header(compress_id, num_parts):
-    """Build the 4096-byte nukecodes.bin header."""
+    """Build the 4096-byte otaku.bin header."""
     hdr = struct.pack(
         "<4sHHHH",
         DDBUNDLE_MAGIC,
@@ -252,7 +252,7 @@ ui_print() {{
     echo "ui_print" >&$OUTFD
 }}
 
-BUNDLE="/tmp/nukecodes.bin"
+BUNDLE="/tmp/otaku.bin"
 {chr(10).join(part_vars)}
 NUM_PARTS={num_parts}
 COMPRESS_ID={compress_id}
@@ -262,8 +262,8 @@ ui_print ""
 ui_print ""
 ''')
 
-    script_parts.append(f'''# ── Step {extract_step}/{total_steps}: Extract nukecodes.bin from ZIP ──────────────────
-ui_print "[Step {extract_step}/{total_steps}] Extracting nukecodes.bin..."
+    script_parts.append(f'''# ── Step {extract_step}/{total_steps}: Extract otaku.bin from ZIP ──────────────────
+ui_print "[Step {extract_step}/{total_steps}] Extracting otaku.bin..."
 
 rm -f "$BUNDLE"
 if [ ! -f "$ZIPFILE" ]; then
@@ -273,19 +273,19 @@ fi
 
 EXTRACT_OK=0
 if which unzip >/dev/null 2>&1; then
-    unzip -o -j "$ZIPFILE" nukecodes.bin -d /tmp/ >/dev/null 2>&1 && EXTRACT_OK=1
+    unzip -o -j "$ZIPFILE" otaku.bin -d /tmp/ >/dev/null 2>&1 && EXTRACT_OK=1
 fi
 if [ "$EXTRACT_OK" = "0" ] && busybox --list 2>/dev/null | grep -q "^unzip$"; then
-    busybox unzip -o -j "$ZIPFILE" nukecodes.bin -d /tmp/ >/dev/null 2>&1 && EXTRACT_OK=1
+    busybox unzip -o -j "$ZIPFILE" otaku.bin -d /tmp/ >/dev/null 2>&1 && EXTRACT_OK=1
 fi
 if [ "$EXTRACT_OK" = "0" ] && toybox unzip --help >/dev/null 2>&1; then
-    toybox unzip -o -j "$ZIPFILE" nukecodes.bin -d /tmp/ >/dev/null 2>&1 && EXTRACT_OK=1
+    toybox unzip -o -j "$ZIPFILE" otaku.bin -d /tmp/ >/dev/null 2>&1 && EXTRACT_OK=1
 fi
 
 if [ "$EXTRACT_OK" = "0" ] || [ ! -f "$BUNDLE" ]; then
-    ui_print "! ABORT: Failed to extract nukecodes.bin from ZIP"
+    ui_print "! ABORT: Failed to extract otaku.bin from ZIP"
     ui_print "! ZIP: $ZIPFILE"
-    ui_print "! Make sure the ZIP contains 'nukecodes.bin' in its root."
+    ui_print "! Make sure the ZIP contains 'otaku.bin' in its root."
     exit 1
 fi
 
@@ -594,7 +594,7 @@ def _parse_args(args, kwargs):
 
 
 def run(*args, **kwargs):
-    """Generate a nukecodes-format flashable ZIP from partition images.
+    """Generate a otaku-format flashable ZIP from partition images.
 
     Parameters (via dict or kwargs)
     -------------------------------
@@ -691,9 +691,9 @@ def run(*args, **kwargs):
         lines.append(f"  Output      : {os.path.basename(output_path)}")
         lines.append("")
 
-        # ── Step 1: Build nukecodes.bin ──
-        _report_progress(1, total_steps, "Building nukecodes.bin", percent=0)
-        lines.append(f"[Step 1] Building nukecodes.bin")
+        # ── Step 1: Build otaku.bin ──
+        _report_progress(1, total_steps, "Building otaku.bin", percent=0)
+        lines.append(f"[Step 1] Building otaku.bin")
         lines.append(f"  Compressing {num_parts} partition(s) with {compress_name}{level_display}...")
 
         # Warn about high compression levels on mobile
@@ -791,7 +791,7 @@ def run(*args, **kwargs):
 
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
-        # Write nukecodes.bin to temp file to avoid double-copying in memory
+        # Write otaku.bin to temp file to avoid double-copying in memory
         # Defensive: ensure TMPDIR exists (Android has no /tmp by default).
         # We set TMPDIR in pybridge.c / PythonBridge.kt, but create it here
         # as a safety net. Avoid tempfile.gettempdir() — it also throws
@@ -813,7 +813,7 @@ def run(*args, **kwargs):
             del bundle_data  # free memory before ZIP creation
 
             with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_STORED) as zf:
-                zf.write(bundle_tmp.name, "nukecodes.bin")
+                zf.write(bundle_tmp.name, "otaku.bin")
                 zf.writestr("flash_info.txt", flash_info)
                 zf.writestr("META-INF/com/google/android/update-binary", update_binary)
                 zf.writestr("META-INF/com/google/android/updater-script", updater_script)

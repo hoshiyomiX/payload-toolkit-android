@@ -9,7 +9,7 @@ Modes:
     dump  — Extract partition images from payload.bin
     gen   — Generate a payload.bin from .img files
     zip   — Generate a flashable OTA ZIP from .img files (AOSP payload.bin format)
-    dd    — Generate a nukecodes-format flashable ZIP (dd-based flasher)
+    dd    — Generate a otaku-format flashable ZIP (dd-based flasher)
     sign  — Sign payload.bin with RSA key
 """
 
