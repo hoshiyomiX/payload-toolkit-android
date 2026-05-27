@@ -38,7 +38,7 @@ import android.app.PendingIntent
 import androidx.core.app.NotificationCompat
 
 /**
- * MainActivity — Payload Toolkit Android.
+ * MainActivity — OTAku Android.
  *
  * Single-purpose: Repack partition images (.img) into a flashable OTA ZIP.
  *
@@ -121,7 +121,7 @@ class MainActivity : AppCompatActivity() {
                 )
                 val notification = NotificationCompat.Builder(ctx, PayloadToolkitApp.CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.ic_media_play)
-                    .setContentTitle("Payload Toolkit")
+                    .setContentTitle("OTAku")
                     .setContentText(message)
                     .setProgress(100, percent.coerceIn(0, 100), percent == 0)
                     .setOngoing(true)
@@ -249,7 +249,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun initializePython() {
         lifecycleScope.launch {
-            showLog("Initializing Payload Toolkit...\n", LogLevel.INFO)
+            showLog("Initializing OTAku...\n", LogLevel.INFO)
             withContext(Dispatchers.IO) {
                 val result = PythonBridge.ensureInitialized(this@MainActivity)
                 withContext(Dispatchers.Main) {
@@ -574,7 +574,7 @@ class MainActivity : AppCompatActivity() {
                 MaterialAlertDialogBuilder(this)
                     .setTitle("Storage Permission Required")
                     .setMessage(
-                        "Payload Toolkit needs access to all files to read/write " +
+                        "OTAku needs access to all files to read/write " +
                         "partition images and generate OTA ZIPs.\n\n" +
                         "Please grant 'All files access' in the next screen."
                     )
@@ -1052,7 +1052,7 @@ class MainActivity : AppCompatActivity() {
                 cancelRepackNotification()
                 showLog("\n[ERROR] Repack was interrupted — process killed (idle timeout).\n", LogLevel.ERROR)
                 showLog("The device may have entered Doze mode and killed the background process.\n", LogLevel.WARN)
-                showLog("Tip: go to Settings → Apps → Payload Toolkit → Battery → Unrestricted.\n", LogLevel.INFO)
+                showLog("Tip: go to Settings → Apps → OTAku → Battery → Unrestricted.\n", LogLevel.INFO)
                 setUIExecuting(false)
             } else {
                 // Process still alive — reconnect UI

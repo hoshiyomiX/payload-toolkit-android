@@ -1,4 +1,4 @@
-# ProGuard rules for Payload Toolkit v2.1
+# ProGuard rules for OTAku v2.1
 # ================================
 
 # Keep Kotlin coroutines

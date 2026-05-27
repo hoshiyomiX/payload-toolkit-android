@@ -49,7 +49,7 @@ class PayloadService : Service() {
         const val EXTRA_PROGRESS_MESSAGE = "progress_message"
 
         // Notification ID constants for updating
-        private const val NOTIFICATION_TITLE = "Payload Toolkit"
+        private const val NOTIFICATION_TITLE = "OTAku"
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

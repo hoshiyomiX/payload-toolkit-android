@@ -1,4 +1,4 @@
-// Payload Toolkit Android — app module build.gradle (Groovy DSL)
+// OTAku Android — app module build.gradle (Groovy DSL)
 // Pure Android/Kotlin — no Chaquopy.
 // Python runtime (Termux 3.13) native libs in jniLibs (executable via nativeLibraryDir).
 // Python stdlib (.py) in assets. payload_toolkit.pyz in assets.
