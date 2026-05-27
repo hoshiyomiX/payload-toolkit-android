@@ -750,15 +750,15 @@ class MainActivity : AppCompatActivity() {
         // pure-Python SHA-256 fallback, and bz2 is optional (use gzip/xz/brotli).
         val depCheck = cachedDepCheck
         if (depCheck == null) {
-            showLog("Python runtime not ready. Restart the app.\n\n", LogHelper.LogLevel.ERROR)
+            showLog("Python runtime not ready. Restart the app.\n\n", LogLevel.ERROR)
             return
         }
         // Show informational warnings for missing modules (don't block repack).
         if (depCheck.missing.contains("hashlib")) {
-            showLog("[!] hashlib C extension unavailable — using pure-Python SHA-256 fallback.\n", LogHelper.LogLevel.WARN)
+            showLog("[!] hashlib C extension unavailable — using pure-Python SHA-256 fallback.\n", LogLevel.WARN)
         }
         if (depCheck.missing.contains("bz2")) {
-            showLog("[!] bz2 unavailable — bzip2 compression disabled.\n", LogHelper.LogLevel.WARN)
+            showLog("[!] bz2 unavailable — bzip2 compression disabled.\n", LogLevel.WARN)
         }
         if (selectedCompression !in depCheck.availableCompression) {
             showLog("Cannot start repack: compression '$selectedCompression' is not available.\n", LogLevel.ERROR)
