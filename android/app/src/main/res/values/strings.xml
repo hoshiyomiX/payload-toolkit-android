@@ -54,7 +54,7 @@
     <!-- About dialog -->
     <string name="about_title">About OTAku</string>
     <string name="about_version">Version %1$s</string>
-    <string name="about_description">Non-root Android app for repacking partition images into flashable OTA ZIP.\n\nBased on payload_toolkit — AOSP-compliant OTA toolkit.\n\nDD mode generates ddbundle-format ZIPs flashable via TWRP/OrangeFox recovery.</string>
+    <string name="about_description">Non-root Android app for repacking partition images into flashable OTA ZIP.\n\nBased on payload_toolkit — AOSP-compliant OTA toolkit.\n\nDD mode generates nukecodes-format ZIPs flashable via TWRP/OrangeFox recovery.</string>
     <string name="about_ok">OK</string>
 
     <!-- Theme -->

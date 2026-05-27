@@ -222,7 +222,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         inputDir = File(filesDir, "input").also { it.mkdirs() }
-        outputDir = File(filesDir, "output").also { it.mkdirs() }
+        outputDir = File("/storage/emulated/0/OTAku").also { it.mkdirs() }
 
         initializePython()
         setupCompressionSelector()
@@ -415,13 +415,14 @@ class MainActivity : AppCompatActivity() {
     private fun setupOutputField() {
         val editOutput = findViewById<android.widget.EditText>(R.id.editTextOutput)
 
-        // Restore persisted output directory, or default to filesDir/output
+        // Restore persisted output directory, or default to /storage/emulated/0/OTAku
         val savedDir = prefs.getString("output_dir", null)
         if (savedDir != null) {
             outputDirPath = savedDir
             editOutput?.setText(savedDir)
         } else {
             editOutput?.setText(outputDir.absolutePath)
+            outputDirPath = outputDir.absolutePath
         }
 
         // Listen for manual edits in the output path field
@@ -784,22 +785,6 @@ class MainActivity : AppCompatActivity() {
         }
         val outPath = File(outDir, outputFileName).absolutePath
 
-        // Log header
-        showLog("\n${"\u2550".repeat(50)}\n")
-        showLog("Generating flashable OTA ZIP\n", LogLevel.INFO)
-        showLog("${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())}\n")
-        showLog("\u2500".repeat(50) + "\n\n")
-
-        showLog("Partitions (${images.size}):\n", LogLevel.INFO)
-        images.entries.sortedBy { it.key }.forEach { (name, path) ->
-            val file = File(path)
-            showLog("  $name (${formatFileSize(file.length())})\n")
-        }
-        showLog("Compression: $selectedCompression (level $selectedCompressionLevel)\n", LogLevel.INFO)
-        showLog("Device: $deviceValue\n", LogLevel.INFO)
-        showLog("Output file: $outputFileName\n", LogLevel.INFO)
-        showLog("Output path: $outPath\n\n", LogLevel.INFO)
-
         // Store state in companion object (survives Activity recreation)
         lastOutputPath = outPath
         lastProgressMessage = ""
@@ -812,7 +797,6 @@ class MainActivity : AppCompatActivity() {
         val sortedNames = images.keys.sorted()
         partitionNames = sortedNames
         setupSplitProgressBar(sortedNames)
-        showLog("[INFO] Starting repack operation...\n", LogLevel.INFO)
         showProgressNotification("Preparing repack...", 0)
 
         // Execute in application-scoped scope (survives Activity destruction)
@@ -858,7 +842,7 @@ class MainActivity : AppCompatActivity() {
                                     val name = msg.removePrefix("Compressing ").trim()
                                     partitionNames.indexOf(name)
                                 }
-                                msg.contains("Building ddbundle") -> {
+                                msg.contains("Building nukecodes") -> {
                                     // Pre-partition step: show bar 0 as indeterminate (process started)
                                     currentPartitionIndex = 0
                                     -2  // special sentinel
@@ -899,7 +883,7 @@ class MainActivity : AppCompatActivity() {
                                         if (bar != null) {
                                             // During pre-partition step (sentinel -2), show bar 0 as indeterminate
                                             if (currentPartitionIndex == 0 && partitionProgress[0] == 0 && i == 0
-                                                && progress.message.contains("Building ddbundle")) {
+                                                && progress.message.contains("Building nukecodes")) {
                                                 bar.isIndeterminate = true
                                             } else {
                                                 bar.isIndeterminate = false
@@ -967,20 +951,14 @@ class MainActivity : AppCompatActivity() {
         isExecuting = false
         setUIExecuting(false)
 
-        showLog("\n" + "\u2550".repeat(50) + "\n")
         if (success) {
             val duration = if (durationMs < 60000) "${durationMs / 1000}s"
-                else "${durationMs / 60000}m ${durationMs % 60000}"
-            showLog("Completed in ${durationMs}ms\n", LogLevel.SUCCESS)
-            showLog("Output: $lastOutputPath\n", LogLevel.INFO)
+                else "${durationMs / 60000}m ${durationMs % 60000 / 1000}s"
             showCompletionNotification(true, "Completed in $duration")
         } else {
-            showLog("Failed in ${durationMs}ms\n", LogLevel.ERROR)
-            showLog("Error: $error\n", LogLevel.ERROR)
+            showLog("[ERROR] ${error ?: "Unknown error"}\n", LogLevel.ERROR)
             showCompletionNotification(false, error ?: "Unknown error")
         }
-        showLog("\u2550".repeat(50) + "\n\n")
-        showLog("[INFO] Repack finished\n", LogLevel.INFO)
     }
 
     // ═══════════════════════════════════════════════════

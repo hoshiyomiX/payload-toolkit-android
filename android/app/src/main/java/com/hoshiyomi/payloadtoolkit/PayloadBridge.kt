@@ -30,7 +30,7 @@ data class PayloadResult(
 /**
  * PayloadBridge — Kotlin singleton that bridges the Android UI to payload_toolkit.pyz.
  *
- * This app is DD-mode only: generates ddbundle-format flashable ZIPs
+ * This app is DD-mode only: generates nukecodes-format flashable ZIPs
  * from partition images (.img) for TWRP/OrangeFox recovery flashing.
  *
  * Supported compression: none, gzip, bzip2, xz, brotli
@@ -38,7 +38,7 @@ data class PayloadResult(
 object PayloadBridge {
 
     // Compression algorithm choices exposed in the UI spinner
-    val COMPRESSION_ALGORITHMS = listOf("gzip", "none", "bzip2", "xz", "brotli")
+    val COMPRESSION_ALGORITHMS = listOf("brotli", "bzip2", "gzip", "none", "xz")
 
     // All valid compression values (for validation)
     val ALL_COMPRESSION = setOf("none", "gzip", "bzip2", "xz", "brotli")
@@ -87,10 +87,10 @@ object PayloadBridge {
     // ═══════════════════════════════════════════════════════════════
 
     /**
-     * DD mode — Generate a dd-based flashable ZIP (ddbundle format).
+     * DD mode — Generate a dd-based flashable ZIP (nukecodes format).
      *
      * Produces a flashable ZIP with:
-     *   - ddbundle.bin (compressed partition images)
+     *   - nukecodes.bin (compressed partition images)
      *   - META-INF/com/google/android/update-binary (TWRP/OrangeFox flasher script)
      *   - META-INF/com/google/android/updater-script (stub)
      *   - flash_info.txt (human-readable metadata)
