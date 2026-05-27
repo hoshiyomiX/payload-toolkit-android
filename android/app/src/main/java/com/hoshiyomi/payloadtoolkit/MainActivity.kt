@@ -319,11 +319,13 @@ class MainActivity : AppCompatActivity() {
     //  Theme Management
     // ═══════════════════════════════════════════════════════════════
 
+    /** Apply theme. Default: follow system; user can override to Light/Dark. */
     private fun applyTheme() {
-        val themeMode = prefs.getString("pref_theme_mode", "light") ?: "light"
+        val themeMode = prefs.getString("pref_theme_mode", "system") ?: "system"
         when (themeMode) {
+            "light" -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
             "dark" -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
-            else -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
+            else -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
         }
     }
 
@@ -348,10 +350,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Cycle theme: Light <-> Dark (2 modes) */
+    /** Cycle theme: System -> Light -> Dark -> System */
     private fun cycleTheme() {
-        val current = prefs.getString("pref_theme_mode", "light") ?: "light"
-        val next = if (current == "light") "dark" else "light"
+        val current = prefs.getString("pref_theme_mode", "system") ?: "system"
+        val next = when (current) {
+            "system" -> "light"
+            "light" -> "dark"
+            else -> "system"
+        }
         prefs.edit { putString("pref_theme_mode", next) }
         applyTheme()
         invalidateOptionsMenu()
@@ -360,8 +366,12 @@ class MainActivity : AppCompatActivity() {
     /** Update the theme toggle menu icon to reflect current mode. */
     private fun updateThemeIcon(menu: android.view.Menu?) {
         val item = menu?.findItem(R.id.action_toggle_theme) ?: return
-        val mode = prefs.getString("pref_theme_mode", "light") ?: "light"
-        item.setIcon(if (mode == "dark") R.drawable.ic_theme_dark else R.drawable.ic_theme_light)
+        val mode = prefs.getString("pref_theme_mode", "system") ?: "system"
+        item.setIcon(when (mode) {
+            "light" -> R.drawable.ic_theme_light
+            "dark" -> R.drawable.ic_theme_dark
+            else -> R.drawable.ic_theme_auto
+        })
     }
 
     private fun setupThemeToggle() {
