@@ -20,7 +20,7 @@
 # only need read access, so app data is fine for them.
 #
 # Packages: python 3.13, python-brotli, libandroid-support, liblzma,
-#           libbz2, libcrypto, libsqlite3, libexpat, libffi, zlib, libcrypt
+#           libbz2, libcrypto, libsqlite3, libexpat, libsqlite, libffi, zlib, libcrypt
 
 set -euo pipefail
 
@@ -42,6 +42,7 @@ PACKAGES=(
     liblzma
     openssl
     sqlite
+    libsqlite
     zlib
 )
 
