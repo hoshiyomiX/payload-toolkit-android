@@ -398,6 +398,11 @@ print(fix_needed_all('$so_file', '$JNI_DIR'))")
     # the SONAME patching sometimes fails to create the correct unversioned
     # symlink, causing these extensions to be falsely removed.
     # Skip removal for these protected extension modules.
+    # Protected base names — matched with wildcard suffix.
+    # Actual on-device filenames include platform tags:
+    #   _hashlib.cpython-313-arm-linux-androideabi.so
+    #   _hashlib.cpython-313-aarch64-linux-android.so
+    # So we use prefix matching (*=suffix glob).
     PROTECTED_EXTENSIONS=(
         "_hashlib.so"
         "_bz2.so"
@@ -416,11 +421,56 @@ print(fix_needed_all('$so_file', '$JNI_DIR'))")
         "_codecs_kr.so"
         "_codecs_tw.so"
         "_multibytecodec.so"
+        "_ssl.so"
+        "_elementtree.so"
+        "_pickle.so"
+        "_json.so"
+        "_csv.so"
+        "_decimal.so"
+        "_datetime.so"
+        "unicodedata.so"
+        "_ctypes.so"
+        "_asyncio.so"
+        "_blake2.so"
+        "_sha3.so"
+        "_random.so"
+        "math.so"
+        "cmath.so"
+        "_bisect.so"
+        "_heapq.so"
+        "_queue.so"
+        "_opcode.so"
+        "_statistics.so"
+        "_contextvars.so"
+        "_interpchannels.so"
+        "_interpreters.so"
+        "_interpqueues.so"
+        "_posixsubprocess.so"
+        "select.so"
+        "mmap.so"
+        "_lzma.so"
+        "termios.so"
+        "fcntl.so"
+        "resource.so"
+        "grp.so"
+        "syslog.so"
+        "binascii.so"
+        "array.so"
+        "_lsprof.so"
+        "_multiprocessing.so"
+        "_posixshmem.so"
+        "_zoneinfo.so"
+        "_sqlite3.so"
+        "_brotli.so"
     )
     _is_protected() {
         local name="$1"
+        # Match all Python C extension modules: *.cpython-*-*.so
+        # These are loaded by Python's import machinery, not the linker.
+        [[ "$name" == *.cpython-*-*.so ]] && return 0
+        # Also match by base-name prefix for completeness
         for p in "${PROTECTED_EXTENSIONS[@]}"; do
-            [ "$name" = "$p" ] && return 0
+            [[ "$name" == "$p"* ]] && return 0
         done
         return 1
     }

@@ -365,6 +365,11 @@ def fix_needed_all(path, jni_dir):
     string that both DT_NEEDED and .gnu.version_r reference, so there
     is no verneed mismatch after patching.
 
+    Patches unconditionally — the prepare script guarantees all needed
+    shared libs exist as unversioned .so files before this runs.  The
+    previous file-existence check caused silent no-ops on arm32 where
+    libcrypto.so.3 existed in .dynstr but the check missed it.
+
     Returns count of patched entries.
     """
     try:
@@ -388,7 +393,7 @@ def fix_needed_all(path, jni_dir):
         if '.so.' not in needed_name:
             continue
         unversioned = needed_name.split('.so.')[0] + '.so'
-        if os.path.isfile(os.path.join(jni_dir, unversioned)):
+        if len(unversioned) <= len(needed_name):
             if _str_replace_in_place(data, strtab_off, strsz, needed_name, unversioned):
                 patched += 1
 

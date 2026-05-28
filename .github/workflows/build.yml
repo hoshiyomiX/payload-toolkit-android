@@ -49,6 +49,25 @@ jobs:
           echo "jniLibs/arm64-v8a:  $(ls android/app/src/main/jniLibs/arm64-v8a/*.so 2>/dev/null | wc -l) native libs"
           echo "jniLibs/armeabi-v7a: $(ls android/app/src/main/jniLibs/armeabi-v7a/*.so 2>/dev/null | wc -l) native libs"
 
+      - name: Validate native lib counts
+        run: |
+          ARM64_COUNT=$(ls android/app/src/main/jniLibs/arm64-v8a/*.so 2>/dev/null | wc -l)
+          ARM32_COUNT=$(ls android/app/src/main/jniLibs/armeabi-v7a/*.so 2>/dev/null | wc -l)
+          echo "arm64-v8a:    $ARM64_COUNT .so files"
+          echo "armeabi-v7a:  $ARM32_COUNT .so files"
+          MIN_COUNT=40
+          if [ "$ARM64_COUNT" -lt "$MIN_COUNT" ]; then
+            echo "ERROR: arm64-v8a has only $ARM64_COUNT .so files (minimum: $MIN_COUNT)"
+            echo "Extension modules may have been incorrectly removed."
+            exit 1
+          fi
+          if [ "$ARM32_COUNT" -lt "$MIN_COUNT" ]; then
+            echo "ERROR: armeabi-v7a has only $ARM32_COUNT .so files (minimum: $MIN_COUNT)"
+            echo "Extension modules may have been incorrectly removed."
+            exit 1
+          fi
+          echo "[OK] Both architectures have sufficient .so files (>= $MIN_COUNT)"
+
       - name: Upload prepared assets
         uses: actions/upload-artifact@v4
         with:
