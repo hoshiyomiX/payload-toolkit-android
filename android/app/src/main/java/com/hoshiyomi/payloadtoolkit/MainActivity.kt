@@ -978,9 +978,9 @@ class MainActivity : AppCompatActivity() {
                 val label = android.widget.TextView(this).apply {
                     text = "  ${idx + 1}. $name  (${formatFileSize(file.length())})"
                     textSize = 13f
-                    setTextColor(android.content.res.TypedValue().let {
-                        context.theme.resolveAttribute(android.R.attr.textColorSecondary, it, true)
-                        it.data
+                    setTextColor(android.util.TypedValue().let { tv ->
+                        context.theme.resolveAttribute(android.R.attr.textColorSecondary, tv, true)
+                        tv.data
                     })
                     typeface = android.graphics.Typeface.MONOSPACE
                     layoutParams = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -989,9 +989,9 @@ class MainActivity : AppCompatActivity() {
                 val removeBtn = com.google.android.material.button.MaterialButton(this).apply {
                     text = "x"
                     textSize = 14f
-                    setTextColor(android.content.res.TypedValue().let {
-                        context.theme.resolveAttribute(android.R.attr.colorError, it, true)
-                        it.data
+                    setTextColor(android.util.TypedValue().let { tv ->
+                        context.theme.resolveAttribute(android.R.attr.colorError, tv, true)
+                        tv.data
                     })
                     iconPadding = 0
                     insetTop = 0
