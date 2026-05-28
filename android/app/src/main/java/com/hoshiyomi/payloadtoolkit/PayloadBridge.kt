@@ -38,7 +38,8 @@ data class PayloadResult(
 object PayloadBridge {
 
     // Compression algorithm choices exposed in the UI spinner
-    val COMPRESSION_ALGORITHMS = listOf("brotli", "bzip2", "gzip", "none", "xz")
+    // Ordered by compression ratio: worst (none) → best (brotli)
+    val COMPRESSION_ALGORITHMS = listOf("none", "gzip", "bzip2", "xz", "brotli")
 
     // All valid compression values (for validation)
     val ALL_COMPRESSION = setOf("none", "gzip", "bzip2", "xz", "brotli")

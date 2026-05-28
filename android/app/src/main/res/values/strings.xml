@@ -21,6 +21,7 @@
 
     <!-- Device section -->
     <string name="label_device">DEVICE</string>
+    <string name="description_device">Target device codename for flash safety verification.</string>
     <string name="hint_device_required">Required</string>
     <string name="hint_device_codename">Device codename(s) *</string>
     <string name="helper_device_codename">Adds a device safety check to prevent flashing on the wrong device. Separate multiple devices with commas.</string>
