@@ -622,6 +622,7 @@ def run(*args, **kwargs):
     # Accept both 'level' and 'compress_level' keys (CLI sends 'compress_level')
     level_raw = params.get("compress_level") or params.get("level")
     level = int(level_raw) if level_raw is not None else 6  # default to 6 (balanced)
+    level_display = f" (level {level})"
     skip_verify = str(params.get("skip_verify", "false")).lower() in ("true", "1", "yes")
 
     lines = []
