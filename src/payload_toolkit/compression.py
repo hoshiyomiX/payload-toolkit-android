@@ -337,7 +337,7 @@ def compress_streaming(data, algorithm="gzip", level=None, chunk_size=1 << 20,
                 "bzip2 compression requires the 'bz2' module (libbz2).  "
                 "On Android: ensure libbz2.so is in nativeLibraryDir."
             )
-        comp = _bz2_mod.BZ2Compressor(compresslevel=level)
+        comp = _bz2_mod.BZ2Compressor(level)
         offset = 0
         while offset < total:
             chunk = data[offset:offset + chunk_size]
@@ -401,8 +401,8 @@ def compress_streaming(data, algorithm="gzip", level=None, chunk_size=1 << 20,
             offset += len(chunk)
             done = offset
             _progress()
-        buf.write(comp.finish())
-        return buf.getvalue()
+        result_parts.append(comp.finish())
+        return b"".join(result_parts)
 
     raise ValueError(f"Unknown compression algorithm: {algorithm!r}")
 
@@ -480,7 +480,7 @@ def hash_and_compress_file(file_path, algorithm="gzip", level=None,
                 "bzip2 compression requires the 'bz2' module (libbz2).  "
                 "On Android: ensure libbz2.so is in nativeLibraryDir."
             )
-        comp = _bz2_mod.BZ2Compressor(compresslevel=level)
+        comp = _bz2_mod.BZ2Compressor(level)
         with open(file_path, "rb") as f:
             while True:
                 chunk = f.read(chunk_size)
