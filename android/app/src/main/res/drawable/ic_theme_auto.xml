@@ -2,12 +2,11 @@
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
-    android:viewportHeight="24"
-    android:tint="?attr/colorOnSurfaceVariant">
+    android:viewportHeight="24">
 
-    <!-- Android system icon: settings_brightness (sun + half-moon) -->
+    <!-- Material Symbols: settings_brightness (sun + half-moon) -->
     <path
-        android:fillColor="@android:color/white"
+        android:fillColor="#000000"
         android:pathData="M20,8.69L18,11l2,2.29V18h-4.69L13,16l-2.29,2H8v-2.71L5.69,13 8,10.71V6h2.71L13,8l2.29,-2H20V8.69M12,14A2,2 0,0 1,14 12A2,2 0,0 1,12 14A2,2 0,0 1,10 12A2,2 0,0 1,12 10M20,19H4V21H20V19Z" />
 
 </vector>

@@ -21,13 +21,13 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * PayloadService — Foreground service that keeps the repack process alive.
+ * PayloadService — Foreground service that keeps the build process alive.
  *
  * Android can kill background coroutines (lifecycleScope) under memory pressure,
  * especially during long compression operations. This service:
  *   1. Runs as a foreground service with a persistent notification
  *   2. Holds a WakeLock to prevent CPU sleep during heavy I/O
- *   3. Executes the repack via PayloadBridge.dd() and updates notification status
+ *   3. Executes the build via PayloadBridge.dd() and updates notification status
  *   4. Broadcasts results back to MainActivity via LocalBroadcastManager-style intent extras
  *
  * The service is started by MainActivity and stops itself when the operation completes.
@@ -39,8 +39,8 @@ class PayloadService : Service() {
         const val NOTIFICATION_ID = 1001
 
         // Intent action broadcast back to MainActivity
-        const val ACTION_REPACK_RESULT = "com.hoshiyomi.payloadtoolkit.ACTION_REPACK_RESULT"
-        const val ACTION_REPACK_PROGRESS = "com.hoshiyomi.payloadtoolkit.ACTION_REPACK_PROGRESS"
+        const val ACTION_BUILD_RESULT = "com.hoshiyomi.payloadtoolkit.ACTION_BUILD_RESULT"
+        const val ACTION_BUILD_PROGRESS = "com.hoshiyomi.payloadtoolkit.ACTION_BUILD_PROGRESS"
         const val EXTRA_SUCCESS = "success"
         const val EXTRA_OUTPUT = "output"
         const val EXTRA_ERROR = "error"
@@ -67,10 +67,10 @@ class PayloadService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Start foreground immediately with "preparing" notification
-        startForegroundNotification("Preparing repack operation...")
+        startForegroundNotification("Preparing build operation...")
 
         operationJob = serviceScope.launch {
-            executeRepack(intent)
+            executeBuild(intent)
         }
 
         return START_NOT_STICKY
@@ -80,7 +80,7 @@ class PayloadService : Service() {
     //  Core execution
     // ═══════════════════════════════════════════════════════════════
 
-    private suspend fun executeRepack(intent: Intent?) {
+    private suspend fun executeBuild(intent: Intent?) {
         val images: Map<String, String> =
             @Suppress("DEPRECATION")
             (intent?.getSerializableExtra("images") as? Map<*, *>)?.mapKeys { it.key.toString() }
@@ -92,14 +92,14 @@ class PayloadService : Service() {
         val outputPath = intent?.getStringExtra("output_path") ?: ""
 
         if (images.isEmpty() || outputPath.isBlank()) {
-            updateNotification("Repack failed: missing parameters", isError = true)
+            updateNotification("Build failed: missing parameters", isError = true)
             broadcastResult(PayloadResult.error("Missing images or output path"))
             stopSelf()
             return
         }
 
         val partitionInfo = images.keys.sorted().joinToString(", ")
-        updateNotification("Repacking: $partitionInfo [$compression]...")
+        updateNotification("Building: $partitionInfo [$compression]...")
 
         val result = PayloadBridge.dd(
             images = images,
@@ -109,7 +109,7 @@ class PayloadService : Service() {
             outputPath = outputPath,
             onProgress = { progress ->
                 // Update notification with progress percentage
-                val notifText = "Repacking: $progress.percent% — ${progress.message}"
+                val notifText = "Building: $progress.percent% — ${progress.message}"
                 updateNotification(notifText)
                 // Broadcast progress to MainActivity for progress bar
                 broadcastProgress(progress)
@@ -119,12 +119,12 @@ class PayloadService : Service() {
         // Update notification with final status
         if (result.success) {
             updateNotification(
-                "Repack completed in ${formatDuration(result.durationMs)}",
+                "Build completed in ${formatDuration(result.durationMs)}",
                 isSuccess = true
             )
         } else {
             updateNotification(
-                "Repack failed after ${formatDuration(result.durationMs)}",
+                "Build failed after ${formatDuration(result.durationMs)}",
                 isError = true
             )
         }
@@ -189,7 +189,7 @@ class PayloadService : Service() {
     // ═══════════════════════════════════════════════════════════════
 
     private fun broadcastResult(result: PayloadResult) {
-        val broadcast = Intent(ACTION_REPACK_RESULT).apply {
+        val broadcast = Intent(ACTION_BUILD_RESULT).apply {
             putExtra(EXTRA_SUCCESS, result.success)
             putExtra(EXTRA_OUTPUT, result.output)
             putExtra(EXTRA_ERROR, result.error)
@@ -200,7 +200,7 @@ class PayloadService : Service() {
     }
 
     private fun broadcastProgress(progress: ProgressUpdate) {
-        val broadcast = Intent(ACTION_REPACK_PROGRESS).apply {
+        val broadcast = Intent(ACTION_BUILD_PROGRESS).apply {
             putExtra(EXTRA_PROGRESS_PERCENT, progress.percent)
             putExtra(EXTRA_PROGRESS_MESSAGE, progress.message)
             setPackage(packageName)
@@ -216,7 +216,7 @@ class PayloadService : Service() {
         val powerManager = getSystemService(PowerManager::class.java)
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
-            "PayloadToolkit::RepackWakeLock"
+            "PayloadToolkit::BuildWakeLock"
         ).apply {
             setReferenceCounted(false)
             acquire(30 * 60 * 1000L) // 30 minute max timeout safety

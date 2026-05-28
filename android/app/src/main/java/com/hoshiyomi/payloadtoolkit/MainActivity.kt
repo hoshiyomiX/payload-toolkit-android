@@ -40,13 +40,13 @@ import androidx.core.app.NotificationCompat
 /**
  * MainActivity — OTAku Android.
  *
- * Single-purpose: Repack partition images (.img) into a flashable OTA ZIP.
+ * Single-purpose: Build partition images (.img) into a flashable OTA ZIP.
  *
  * Flow:
  *   1. Select partition images (dd.img, odm.img, dlkm.img, etc.)
  *   2. Choose compression algorithm
  *   3. Select output directory
- *   4. Tap "Repack" to generate flashable OTA ZIP
+ *   4. Tap "Build" to generate flashable OTA ZIP
  *
  * Python runtime: external Python (Termux recommended).
  * payload_toolkit.pyz is bundled as an asset and extracted at first launch.
@@ -62,12 +62,12 @@ class MainActivity : AppCompatActivity() {
     private var imageFiles: MutableList<Pair<String, String>> = mutableListOf() // (name, path)
     private var isExecuting = false
     companion object {
-        // Application-scoped coroutine scope for long-running repack operations.
+        // Application-scoped coroutine scope for long-running build operations.
         // Survives Activity destruction when the user minimizes the app.
-        private val repackScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        private val buildScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-        // Whether a repack is currently running (survives Activity recreation)
-        @Volatile var isRepacking = false
+        // Whether a build is currently running (survives Activity recreation)
+        @Volatile var isBuilding = false
             private set
 
         // Weak reference to the current Activity for safe UI updates from coroutine
@@ -103,7 +103,7 @@ class MainActivity : AppCompatActivity() {
         private const val NOTIFICATION_ID = 1001
         @Volatile private var appContext: Context? = null
 
-        // Cached dependency check result (updated at init, used for pre-repack validation)
+        // Cached dependency check result (updated at init, used for pre-build validation)
         @Volatile var cachedDepCheck: PythonBridge.DepCheckResult? = null
             private set
 
@@ -147,7 +147,7 @@ class MainActivity : AppCompatActivity() {
                 )
                 val notification = NotificationCompat.Builder(ctx, PayloadToolkitApp.CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.ic_media_play)
-                    .setContentTitle(if (success) "Repack Complete" else "Repack Failed")
+                    .setContentTitle(if (success) "Build Complete" else "Build Failed")
                     .setContentText(message)
                     .setOngoing(false)
                     .setAutoCancel(true)
@@ -158,8 +158,8 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Exception) { /* notification is non-critical */ }
         }
 
-        /** Cancel the repack notification. */
-        fun cancelRepackNotification() {
+        /** Cancel the build notification. */
+        fun cancelBuildNotification() {
             try {
                 appContext?.let {
                     (it.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
@@ -261,7 +261,7 @@ class MainActivity : AppCompatActivity() {
                             }
                             showLog("OTAku ready — $depReport")
 
-                            // Cache parsed result for pre-repack validation
+                            // Cache parsed result for pre-build validation
                             cachedDepCheck = withContext(Dispatchers.IO) {
                                 PythonBridge.checkDependenciesParsed()
                             }
@@ -520,7 +520,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<View>(R.id.buttonExecute).setOnClickListener {
-            onRepackClicked()
+            onBuildClicked()
         }
 
         findViewById<View>(R.id.buttonCopyLog).setOnClickListener {
@@ -698,14 +698,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  Execution — Repack to OTA ZIP
+    //  Execution — Build to OTA ZIP
     // ═══════════════════════════════════════════════════════════════
 
     override fun onBackPressed() {
-        if (isRepacking) {
+        if (isBuilding) {
             MaterialAlertDialogBuilder(this)
-                .setTitle("Repack in Progress")
-                .setMessage("The repack operation is running in the background " +
+                .setTitle("Build in Progress")
+                .setMessage("The build operation is running in the background " +
                     "and will continue even if you leave the app.")
                 .setPositiveButton("Stay", null)
                 .show()
@@ -714,8 +714,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun onRepackClicked() {
-        if (isRepacking) {
+    private fun onBuildClicked() {
+        if (isBuilding) {
             showLog("Operation already in progress. Please wait.", LogLevel.WARN)
             return
         }
@@ -726,7 +726,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // Pre-repack dependency check: validate selected compression is available.
+        // Pre-build dependency check: validate selected compression is available.
         // Uses cached result from initialization to avoid blocking the UI.
         // Note: hashlib and bz2 are non-blocking — compression.py provides a
         // pure-Python SHA-256 fallback, and bz2 is optional (use gzip/xz/brotli).
@@ -735,7 +735,7 @@ class MainActivity : AppCompatActivity() {
             showLog("Python runtime not ready. Restart the app.", LogLevel.ERROR)
             return
         }
-        // Show informational warnings for missing modules (don't block repack).
+        // Show informational warnings for missing modules (don't block build).
         if (depCheck.missing.contains("hashlib")) {
             showLog("hashlib C extension unavailable — using pure-Python SHA-256 fallback.", LogLevel.WARN)
         }
@@ -743,12 +743,12 @@ class MainActivity : AppCompatActivity() {
             showLog("bz2 unavailable — bzip2 compression disabled.", LogLevel.WARN)
         }
         if (selectedCompression !in depCheck.availableCompression) {
-            showLog("Cannot start repack: compression '$selectedCompression' is not available.", LogLevel.ERROR)
+            showLog("Cannot start build: compression '$selectedCompression' is not available.", LogLevel.ERROR)
             showLog("  Available: ${depCheck.availableCompression.joinToString(", ")}", LogLevel.INFO)
             return
         }
 
-        // Collect parameters for repack
+        // Collect parameters for build
         val images = imageFiles.toMap()
         val device = findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.editTextDevice)
             ?.text?.toString()?.trim() ?: ""
@@ -771,7 +771,7 @@ class MainActivity : AppCompatActivity() {
         lastProgressMessage = ""
         lastProgressPercent = -1
         lastProgressTime = System.currentTimeMillis()  // Start heartbeat
-        isRepacking = true
+        isBuilding = true
         isExecuting = true
         appContext = applicationContext
         setUIExecuting(true)
@@ -781,7 +781,7 @@ class MainActivity : AppCompatActivity() {
         showProgressNotification("Preparing…", 0)
 
         // Execute in application-scoped scope (survives Activity destruction)
-        repackScope.launch {
+        buildScope.launch {
             try {
                 // Acquire WakeLock with application context
                 val act = activityRef?.get()
@@ -789,7 +789,7 @@ class MainActivity : AppCompatActivity() {
                     val pm = act.applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager
                     wakeLock = pm.newWakeLock(
                         PowerManager.PARTIAL_WAKE_LOCK,
-                        "PayloadToolkit::RepackWakeLock"
+                        "PayloadToolkit::BuildWakeLock"
                     ).apply {
                         setReferenceCounted(false)
                         acquire(3 * 60 * 60 * 1000L)  // 3 hours — enough for any compression job
@@ -893,7 +893,7 @@ class MainActivity : AppCompatActivity() {
                 // Handle result on current Activity instance
                 val current = activityRef?.get()
                 if (current != null && !current.isFinishing && !current.isDestroyed) {
-                    current.handleRepackResult(
+                    current.handleBuildResult(
                         success = result.success,
                         output = result.output,
                         error = result.error,
@@ -901,12 +901,12 @@ class MainActivity : AppCompatActivity() {
                     )
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
-                showCompletionNotification(false, "Repack cancelled")
+                showCompletionNotification(false, "Build cancelled")
                 throw e  // Don't swallow coroutine cancellation
             } catch (e: Exception) {
                 val current = activityRef?.get()
                 if (current != null && !current.isFinishing && !current.isDestroyed) {
-                    current.showLog("Repack failed: ${e.message}", LogLevel.ERROR)
+                    current.showLog("Build failed: ${e.message}", LogLevel.ERROR)
                     current.showLog("Check logcat for details.", LogLevel.WARN)
                 }
                 showCompletionNotification(false, "${e.message}")
@@ -914,7 +914,7 @@ class MainActivity : AppCompatActivity() {
                 // Release WakeLock
                 try { wakeLock?.release() } catch (_: Exception) {}
                 wakeLock = null
-                isRepacking = false
+                isBuilding = false
 
                 val current = activityRef?.get()
                 if (current != null && !current.isFinishing && !current.isDestroyed) {
@@ -926,9 +926,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Handle repack result — updates UI with success/failure status.
+     * Handle build result — updates UI with success/failure status.
      */
-    private fun handleRepackResult(success: Boolean, output: String, error: String?, durationMs: Long) {
+    private fun handleBuildResult(success: Boolean, output: String, error: String?, durationMs: Long) {
         isExecuting = false
         setUIExecuting(false)
 
@@ -1068,15 +1068,15 @@ class MainActivity : AppCompatActivity() {
                 textView.text = savedLogText.toString()
             }
         }
-        // Check if repack process is actually alive
-        if (isRepacking) {
+        // Check if build process is actually alive
+        if (isBuilding) {
             val elapsed = System.currentTimeMillis() - lastProgressTime
             if (lastProgressTime > 0 && elapsed > DEAD_PROCESS_THRESHOLD_MS) {
                 // No progress for > 2 minutes — process was killed by OS
-                isRepacking = false
+                isBuilding = false
                 isExecuting = false
-                cancelRepackNotification()
-                showLog("\nRepack was interrupted — process killed (idle timeout).", LogLevel.ERROR)
+                cancelBuildNotification()
+                showLog("\nBuild was interrupted — process killed (idle timeout).", LogLevel.ERROR)
                 showLog("The device may have entered Doze mode and killed the background process.", LogLevel.WARN)
                 showLog("Tip: go to Settings > Apps > OTAku > Battery > Unrestricted.")
                 setUIExecuting(false)
@@ -1084,7 +1084,7 @@ class MainActivity : AppCompatActivity() {
                 // Process still alive — reconnect UI
                 isExecuting = true
                 setUIExecuting(true)
-                showLog("Repack in progress (returned from background).")
+                showLog("Build in progress (returned from background).")
                 // Re-create split progress bars with current state
                 if (partitionCount > 0) {
                     val savedProgress = partitionProgress.copyOf()
@@ -1106,8 +1106,8 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         } else {
-            // Repack finished while app was in background — cancel notification
-            cancelRepackNotification()
+            // Build finished while app was in background — cancel notification
+            cancelBuildNotification()
         }
     }
 
@@ -1194,7 +1194,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun setUIExecuting(executing: Boolean) {
         runOnUiThread {
-            findViewById<View>(R.id.buttonExecute)?.isEnabled = !executing
+            val btnExecute = findViewById<com.google.android.material.button.MaterialButton>(R.id.buttonExecute)
+            btnExecute?.isEnabled = !executing
+            btnExecute?.text = if (executing) "BUILDING OTA..." else getString(R.string.button_repack)
             val container = findViewById<android.widget.LinearLayout>(R.id.progressBarContainer)
             if (executing) {
                 container?.visibility = View.VISIBLE

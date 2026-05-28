@@ -2,7 +2,7 @@
 <!--
     activity_main.xml — OTAku
 
-    Single-purpose: Repack partition images (.img) into flashable OTA ZIP.
+    Single-purpose: Build partition images (.img) into flashable OTA ZIP.
 
     Layout:
     ┌─────────────────────────────────────────┐
@@ -19,7 +19,7 @@
     │   ─────────                             │
     │   Output                                │
     ├─────────────────────────────────────────┤
-    │ [REPACK TO OTA ZIP] + ProgressBar       │
+    │ [BUILD OTA NOW] + ProgressBar           │
     ├─────────────────────────────────────────┤
     │ Log Card (dark terminal)                │
     └─────────────────────────────────────────┘
@@ -410,7 +410,7 @@
             </com.google.android.material.card.MaterialCardView>
 
             <!-- ═══════════════════════════════════════════════════ -->
-            <!-- Repack Button + Progress Bar                        -->
+            <!-- Build Button + Progress Bar                           -->
             <!-- ═══════════════════════════════════════════════════ -->
 
             <com.google.android.material.button.MaterialButton
@@ -489,6 +489,7 @@
                             android:text="@string/button_clear_log"
                             android:textSize="12sp"
                             android:minWidth="0dp"
+                            android:layout_marginStart="8dp"
                             android:paddingHorizontal="12dp" />
 
                     </LinearLayout>

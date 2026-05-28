@@ -640,7 +640,7 @@ def run(*args, **kwargs):
     # ── Check hashlib availability (non-fatal) ──
     # SHA-256 is used for partition integrity verification in the bundle.
     # If C hashlib is unavailable, compression.py uses a pure-Python fallback.
-    # We warn but don't block — the repack will work either way.
+    # We warn but don't block — the build will work either way.
     if not _HAS_HASHLIB:
         lines.append("  ! hashlib C extension unavailable. Using pure-Python SHA-256 fallback.")
         lines.append("")

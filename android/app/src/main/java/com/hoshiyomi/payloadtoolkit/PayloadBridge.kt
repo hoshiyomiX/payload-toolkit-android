@@ -63,7 +63,7 @@ object PayloadBridge {
      */
     private suspend fun executePyz(args: List<String>, onProgress: ((ProgressUpdate) -> Unit)? = null, onOutputLine: ((String) -> Unit)? = null): PayloadResult {
         return withContext(Dispatchers.IO) {
-            // Boost thread priority for CPU-intensive repack operations.
+            // Boost thread priority for CPU-intensive build operations.
             // THREAD_PRIORITY_DEFAULT=0, negative = higher priority.
             // -10 gives ~80% CPU allocation (substantial boost over default).
             try {

@@ -1026,7 +1026,7 @@ object PythonBridge {
     }
 
     /**
-     * Parsed dependency check result for pre-repack validation.
+     * Parsed dependency check result for pre-build validation.
      */
     data class DepCheckResult(
         val allOk: Boolean,
@@ -1036,7 +1036,7 @@ object PythonBridge {
 
     /**
      * Run --check-deps and parse the output into a structured result.
-     * Used by UI to validate before allowing repack.
+     * Used by UI to validate before allowing build.
      *
      * Expected format:
      *   OK:     "v3.1.0 | Python 3.13.13 | none, gzip, bzip2, xz, brotli"

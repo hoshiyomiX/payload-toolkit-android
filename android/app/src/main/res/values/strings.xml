@@ -4,7 +4,7 @@
     <string name="app_name">OTAku</string>
 
     <!-- Toolbar -->
-    <string name="toolbar_subtitle">Partition Repacker</string>
+    <string name="toolbar_subtitle">Partition Builder</string>
 
     <!-- Partitions section -->
     <string name="label_partitions">PARTITIONS</string>
@@ -36,7 +36,7 @@
     <string name="button_browse">Browse</string>
 
     <!-- Actions -->
-    <string name="button_repack">REPACK TO OTA ZIP</string>
+    <string name="button_repack">BUILD OTA NOW</string>
     <string name="button_execute">Execute</string>
     <string name="button_copy_log">Copy</string>
     <string name="button_clear_log">Clear</string>
@@ -47,17 +47,17 @@
     <string name="helper_skip_verify">Disables integrity verification after flashing. Flashing will be faster, but data integrity will not be confirmed.</string>
 
     <!-- Log section -->
-    <string name="label_output_log">Output Log</string>
+    <string name="label_output_log">Logs</string>
 
     <!-- Status messages -->
     <string name="log_init_success">payload_toolkit %1$s loaded — Python %2$s (%3$s)</string>
     <string name="status_initializing">Initializing Python runtime…</string>
-    <string name="status_executing">Repacking partitions…</string>
+    <string name="status_executing">Building partitions…</string>
 
     <!-- About dialog -->
     <string name="about_title">About OTAku</string>
     <string name="about_version">Version %1$s</string>
-    <string name="about_description">A non-root Android tool for repacking partition images into flashable OTA ZIP packages.\n\nBuilt on payload_toolkit, an AOSP-compliant OTA toolkit.</string>
+    <string name="about_description">A non-root Android tool for building partition images into flashable OTA ZIP packages.\n\nBuilt on payload_toolkit, an AOSP-compliant OTA toolkit.</string>
     <string name="about_ok">OK</string>
 
     <!-- Theme -->
