@@ -254,54 +254,28 @@ class MainActivity : AppCompatActivity() {
                 val result = PythonBridge.ensureInitialized(this@MainActivity)
                 withContext(Dispatchers.Main) {
                     if (result.success) {
-                        val pyVer = result.pythonPath?.let {
-                            try {
-                                val pb = ProcessBuilder(it, "--version")
-                                    .redirectErrorStream(true)
-                                    .start()
-                                val raw = pb.inputStream.bufferedReader().readText().trim()
-                                pb.waitFor()
-                                if (result.isBundled) raw.lineSequence()
-                                    .filterNot { it.contains("CANNOT LINK EXECUTABLE") }
-                                    .joinToString("\n") else raw
-                            } catch (_: Exception) { "unknown" }
-                        }
-                        val source = if (result.isBundled) "bundled" else "system"
-                        showLog("Python runtime: $pyVer ($source)")
-
                         lifecycleScope.launch {
-                            val ptVer = withContext(Dispatchers.IO) {
-                                PayloadBridge.getPyzVersion()
-                            }
-                            if (ptVer != null) showLog("payload_toolkit $ptVer loaded")
-
-                            // Run dependency health check
+                            // Run dependency health check (returns concise single-line summary)
                             val depReport = withContext(Dispatchers.IO) {
                                 PythonBridge.checkDependencies()
                             }
-                            if (depReport.isNotBlank()) {
-                                showLog(depReport)
-                            }
+                            showLog("OTAku ready — $depReport")
+
                             // Cache parsed result for pre-repack validation
                             cachedDepCheck = withContext(Dispatchers.IO) {
                                 PythonBridge.checkDependenciesParsed()
                             }
                         }
-
-                        showLog("═".repeat(50))
                     } else {
                         showLog("Initialization failed: ${result.error}", LogLevel.ERROR)
                         // Show detailed diagnostics so the user can report them
                         if (result.diagnostics.isNotBlank()) {
-                            showLog("[Diagnostics]")
                             showLog(result.diagnostics)
-                            showLog("═".repeat(50))
                         }
                         showLog("Possible causes:")
                         showLog("  - APK installed from an old build (before v3.0)")
                         showLog("  - App installed but native libs extraction failed")
                         showLog("  - Try: Uninstall > Re-download latest APK > Install")
-                        showLog("═".repeat(50))
                     }
                 }
             }
@@ -1002,9 +976,8 @@ class MainActivity : AppCompatActivity() {
             "flashable_dd_v1_${ts}_${selectedCompression}.zip"
         }
 
-        // Show preview as helper text below the custom filename input field
-        val layout = findViewById<com.google.android.material.textfield.TextInputLayout>(R.id.layoutCustomFilename)
-        layout?.helperText = fileName
+        // Show preview in dedicated italic TextView
+        findViewById<android.widget.TextView>(R.id.textPreviewFilename)?.text = fileName
     }
 
     private fun copyPendingRemovals() {

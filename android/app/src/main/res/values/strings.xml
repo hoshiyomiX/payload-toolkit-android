@@ -31,6 +31,7 @@
     <string name="hint_output_dir">Output directory</string>
     <string name="hint_custom_filename">Custom filename (optional)</string>
     <string name="helper_custom_filename">Leave empty for auto-generated name</string>
+    <string name="label_preview">Preview:</string>
     <string name="button_browse">Browse</string>
 
     <!-- Actions -->
@@ -48,6 +49,7 @@
     <string name="label_output_log">Output Log</string>
 
     <!-- Status messages -->
+    <string name="log_init_success">payload_toolkit %1$s loaded — Python %2$s (%3$s)</string>
     <string name="status_initializing">Initializing Python runtime…</string>
     <string name="status_executing">Repacking partitions…</string>
 

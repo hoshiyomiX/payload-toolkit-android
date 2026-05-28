@@ -1037,11 +1037,41 @@ object PythonBridge {
     /**
      * Run --check-deps and parse the output into a structured result.
      * Used by UI to validate before allowing repack.
+     *
+     * Expected format:
+     *   OK:     "v3.1.0 | Python 3.13.13 | none, gzip, bzip2, xz, brotli"
+     *   Error:  "v3.1.0 | Python 3.13.13 | none, gzip, bzip2, xz, brotli | missing: hashlib"
      */
     fun checkDependenciesParsed(): DepCheckResult {
         if (!initialized) return DepCheckResult(false, listOf("python"), emptyList())
 
-        val output = checkDependencies()
+        val output = checkDependencies().trim()
+
+        // If output is multi-line (old format fallback), parse the legacy way
+        if (output.lines().size > 1) {
+            return parseLegacyDepOutput(output)
+        }
+
+        // Parse new single-line pipe-delimited format
+        val parts = output.split("|").map { it.trim() }
+        val compression = if (parts.size >= 3) {
+            parts[2].split(",").map { it.trim() }.filter { it.isNotBlank() }
+        } else {
+            emptyList()
+        }
+        val missingPart = parts.find { it.startsWith("missing:") }
+        val missing = if (missingPart != null) {
+            missingPart.removePrefix("missing:").split(",").map { it.trim() }.filter { it.isNotBlank() }
+        } else {
+            emptyList()
+        }
+        val allOk = missing.isEmpty()
+
+        return DepCheckResult(allOk, missing, compression)
+    }
+
+    /** Parse legacy multi-line dependency output (pre-refactor format). */
+    private fun parseLegacyDepOutput(output: String): DepCheckResult {
         var allOk = false
         val missing = mutableListOf<String>()
         val availableCompression = mutableListOf<String>()
@@ -1051,13 +1081,11 @@ object PythonBridge {
             if (trimmed == "Status: OK - all required dependencies available") {
                 allOk = true
             }
-            // Parse MISSING (required) entries
             if (trimmed.startsWith("[!]")) {
                 missing.add(trimmed.removePrefix("[!] ").trim())
             }
         }
 
-        // Parse compression line: "Compression: none, gzip, bzip2"
         val compLine = output.lines().find { it.trim().startsWith("Compression:") }
         if (compLine != null) {
             val comps = compLine.substringAfter(":").split(",").map { it.trim() }

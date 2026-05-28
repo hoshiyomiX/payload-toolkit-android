@@ -357,6 +357,38 @@
 
                     </com.google.android.material.textfield.TextInputLayout>
 
+                    <!-- Output filename preview -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="6dp"
+                        android:paddingStart="4dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/label_preview"
+                            android:textSize="12sp"
+                            android:textColor="?attr/colorOnSurfaceVariant"
+                            android:textStyle="italic"
+                            android:layout_marginEnd="6dp" />
+
+                        <TextView
+                            android:id="@+id/textPreviewFilename"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:textSize="12sp"
+                            android:textColor="?attr/colorOnSurfaceVariant"
+                            android:textStyle="italic"
+                            android:maxLines="2"
+                            android:ellipsize="middle"
+                            android:fontFamily="monospace" />
+
+                    </LinearLayout>
+
                     <!-- Output directory + Browse -->
                     <LinearLayout
                         android:layout_width="match_parent"
