@@ -76,25 +76,12 @@ jobs:
             -PciKeyPass=release-key-pass \
             --no-daemon --stacktrace
 
-      - name: Maximum ZIP compression
-        run: |
-          sudo apt-get install -y -qq p7zip-full 2>/dev/null || true
-          for apk in $(find android/app/build/outputs/apk -name '*.apk' -type f); do
-            [ -f "$apk" ] || continue
-            SIZE_BEFORE=$(stat -c%s "$apk")
-            7z a -tzip -mx=9 -mfb=258 -mpass=15 "${apk}.compressed" "$apk" && mv "${apk}.compressed" "$apk"
-            SIZE_AFTER=$(stat -c%s "$apk")
-            SAVED=$((SIZE_BEFORE - SIZE_AFTER))
-            echo "$(basename "$apk"): ${SIZE_BEFORE} -> ${SIZE_AFTER} (saved ${SAVED} bytes)"
-          done
-
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: release-${{ matrix.target.abi }}
           path: android/app/build/outputs/apk/**/release/*.apk
-          compression-level: 9
           if-no-files-found: warn
           retention-days: 30
 
