@@ -147,7 +147,7 @@ class MainActivity : AppCompatActivity() {
                 )
                 val notification = NotificationCompat.Builder(ctx, PayloadToolkitApp.CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.ic_media_play)
-                    .setContentTitle(if (success) "Repack Completed" else "Repack Failed")
+                    .setContentTitle(if (success) "Repack Complete" else "Repack Failed")
                     .setContentText(message)
                     .setOngoing(false)
                     .setAutoCancel(true)
@@ -585,9 +585,9 @@ class MainActivity : AppCompatActivity() {
                 MaterialAlertDialogBuilder(this)
                     .setTitle("Storage Permission Required")
                     .setMessage(
-                        "OTAku needs access to all files to read/write " +
-                        "partition images and generate OTA ZIPs.\n\n" +
-                        "Please grant 'All files access' in the next screen."
+                        "OTAku needs full file access to read partition images " +
+                        "and save the output ZIP.\n\n" +
+                        "Please grant \"All files access\" on the next screen."
                     )
                     .setPositiveButton("Grant Access") { _, _ ->
                         val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
@@ -723,7 +723,7 @@ class MainActivity : AppCompatActivity() {
     override fun onBackPressed() {
         if (isRepacking) {
             MaterialAlertDialogBuilder(this)
-                .setTitle("Repack in progress")
+                .setTitle("Repack in Progress")
                 .setMessage("The repack operation is running in the background " +
                     "and will continue even if you leave the app.")
                 .setPositiveButton("Stay", null)
@@ -797,7 +797,7 @@ class MainActivity : AppCompatActivity() {
         val sortedNames = images.keys.sorted()
         partitionNames = sortedNames
         setupSplitProgressBar(sortedNames)
-        showProgressNotification("Preparing repack...", 0)
+        showProgressNotification("Preparing…", 0)
 
         // Execute in application-scoped scope (survives Activity destruction)
         repackScope.launch {
@@ -954,7 +954,7 @@ class MainActivity : AppCompatActivity() {
         if (success) {
             val duration = if (durationMs < 60000) "${durationMs / 1000}s"
                 else "${durationMs / 60000}m ${durationMs % 60000 / 1000}s"
-            showCompletionNotification(true, "Completed in $duration")
+            showCompletionNotification(true, "Finished in $duration")
         } else {
             showLog("${error ?: "Unknown error"}", LogLevel.ERROR)
             showCompletionNotification(false, error ?: "Unknown error")
@@ -1222,7 +1222,7 @@ class MainActivity : AppCompatActivity() {
     private fun copyLogToClipboard() {
         val logText = findViewById<android.widget.TextView>(R.id.textViewLog)?.text?.toString()
         if (logText.isNullOrBlank()) {
-            Toast.makeText(this, "Nothing to copy", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Log is empty", Toast.LENGTH_SHORT).show()
             return
         }
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
