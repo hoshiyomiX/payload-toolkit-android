@@ -1062,27 +1062,33 @@ object PythonBridge {
 
         val output = checkDependencies().trim()
 
-        // If output is multi-line (old format fallback), parse the legacy way
-        if (output.lines().size > 1) {
-            return parseLegacyDepOutput(output)
+        // Find the pipe-delimited version line (e.g. "v3.1.0 | Python 3.13.13 | none, gzip, bzip2, xz, brotli")
+        // This tolerates extra lines from stderr bleed (sitecustomize warnings, linker messages)
+        // that get merged into stdout by redirectErrorStream(true) in exec mode.
+        val versionLine = output.lines().find { line ->
+            val t = line.trim()
+            t.startsWith("v") && t.contains("|") && !t.startsWith("[") && !t.startsWith("WARNING")
         }
 
-        // Parse new single-line pipe-delimited format
-        val parts = output.split("|").map { it.trim() }
-        val compression = if (parts.size >= 3) {
-            parts[2].split(",").map { it.trim() }.filter { it.isNotBlank() }
-        } else {
-            emptyList()
+        if (versionLine != null) {
+            val parts = versionLine.split("|").map { it.trim() }
+            val compression = if (parts.size >= 3) {
+                parts[2].split(",").map { it.trim() }.filter { it.isNotBlank() }
+            } else {
+                emptyList()
+            }
+            val missingPart = parts.find { it.startsWith("missing:") }
+            val missing = if (missingPart != null) {
+                missingPart.removePrefix("missing:").split(",").map { it.trim() }.filter { it.isNotBlank() }
+            } else {
+                emptyList()
+            }
+            val allOk = missing.isEmpty()
+            return DepCheckResult(allOk, missing, compression)
         }
-        val missingPart = parts.find { it.startsWith("missing:") }
-        val missing = if (missingPart != null) {
-            missingPart.removePrefix("missing:").split(",").map { it.trim() }.filter { it.isNotBlank() }
-        } else {
-            emptyList()
-        }
-        val allOk = missing.isEmpty()
 
-        return DepCheckResult(allOk, missing, compression)
+        // Legacy multi-line format fallback (pre-refactor "Compression:" lines)
+        return parseLegacyDepOutput(output)
     }
 
     /** Parse legacy multi-line dependency output (pre-refactor format). */

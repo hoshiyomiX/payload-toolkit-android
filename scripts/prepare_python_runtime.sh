@@ -702,70 +702,118 @@ print('1' if strip_rpath('$so_file') else '0')")
         # and is the ONLY OpenSSL init in exec release mode (critical fix).
         SITECUSTOMIZE="$STDLIB_STAGING/sitecustomize.py"
         cat > "$SITECUSTOMIZE" << 'PYEOF'
-# sitecustomize.py — OpenSSL pre-initialization for Android release builds
+# sitecustomize.py — OpenSSL + extension pre-init for Android release builds
 # Auto-imported by Python's site.py at startup.
 import os
 import sys
 
 
-def _init_openssl():
-    """Force OpenSSL 3.x default provider initialization via ctypes.
+def _get_lib_dir():
+    """Return nativeLibraryDir via PYTHONPATH (set by Kotlin exec fallback)."""
+    pythonpath = os.environ.get('PYTHONPATH', '')
+    if pythonpath:
+        return pythonpath
+    # Fallback: scan sys.path for a directory containing .so files
+    for p in sys.path:
+        if p and os.path.isdir(p):
+            try:
+                if any(f.endswith('.so') for f in os.listdir(p)):
+                    return p
+            except OSError:
+                pass
+    return ''
 
-    In Android release builds (debuggable=false), bionic linker ignores
-    LD_PRELOAD.  This means libcrypto.so loads LAZILY when _hashlib.so
-    needs it, and OpenSSL's constructor may not properly initialize the
-    default provider on some devices/linker versions.
 
-    ctypes.CDLL with an absolute path uses dlopen() directly, which works
-    regardless of the debuggable flag because nativeLibraryDir is always
-    in the app's linker namespace.
+def _preload_lib(name, lib_dir):
+    """Load a shared library via ctypes.CDLL with absolute path.
+
+    ctypes.CDLL(path) calls dlopen() directly, which works regardless of
+    the debuggable flag because nativeLibraryDir is always in the app's
+    linker namespace.  RTLD_GLOBAL makes symbols visible to subsequently
+    loaded libraries (needed for DT_NEEDED resolution).
     """
+    import ctypes
+    _RTLD_NOW = getattr(ctypes, 'RTLD_NOW', 2)
+    _RTLD_GLOBAL = getattr(ctypes, 'RTLD_GLOBAL', 256)
+    if lib_dir:
+        path = os.path.join(lib_dir, name)
+        if os.path.isfile(path):
+            return ctypes.CDLL(path, _RTLD_NOW | _RTLD_GLOBAL)
+    return ctypes.CDLL(name, _RTLD_NOW | _RTLD_GLOBAL)
+
+
+def _preload_all():
+    """Preload C libraries and extension modules for release exec fallback.
+
+    In release builds (debuggable=false), bionic linker SILENTLY IGNORES
+    LD_PRELOAD.  The JNI bridge (libpybridge.so) handles two-phase preload
+    (libs first, then extensions) via JNI_OnLoad, but when it's missing and
+    the exec fallback is used, LD_PRELOAD is the only preload mechanism — and
+    it doesn't work in release.
+
+    This function replicates the two-phase preload from pybridge.c using
+    ctypes.CDLL(absolute_path), which DOES work in release builds because
+    dlopen() with an absolute path always respects the app's linker namespace.
+
+    Phase 1: C libraries (libcrypto, libz, libbz2, liblzma, libffi, etc.)
+    Phase 2: Extension modules (_hashlib, _bz2, _lzma, etc.)
+    """
+    lib_dir = _get_lib_dir()
+
+    # --- Phase 1: C libraries (must be loaded before extensions that need them) ---
+    c_libs = [
+        'libandroid-support.so',
+        'libcrypto.so',
+        'libz.so',
+        'libbz2.so',
+        'liblzma.so',
+        'libffi.so',
+    ]
+    loaded_libs = 0
+    for name in c_libs:
+        try:
+            _preload_lib(name, lib_dir)
+            loaded_libs += 1
+        except Exception:
+            pass
+
+    # --- Phase 2: Extension modules (cpython-*.so files) ---
+    if lib_dir:
+        try:
+            preload_exts = 0
+            for fname in os.listdir(lib_dir):
+                if 'cpython-' in fname and fname.endswith('.so'):
+                    try:
+                        _preload_lib(fname, lib_dir)
+                        preload_exts += 1
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    # --- OpenSSL init (must happen AFTER libcrypto.so is loaded above) ---
     try:
         import ctypes
-
-        # RTLD constants — ctypes.RTLD_NOW / RTLD_GLOBAL may not exist on
-        # Termux Python builds.  Use Linux numeric values directly:
-        #   RTLD_NOW    = 2  (resolve all symbols at load time)
-        #   RTLD_GLOBAL = 256 (make symbols available to subsequently loaded libs)
-        _RTLD_NOW = getattr(ctypes, 'RTLD_NOW', 2)
-        _RTLD_GLOBAL = getattr(ctypes, 'RTLD_GLOBAL', 256)
-
-        # Find libcrypto.so — try PYTHONPATH (nativeLibraryDir) first,
-        # then let the linker search the namespace.
-        pythonpath = os.environ.get('PYTHONPATH', '')
-        if pythonpath:
-            crypto_path = os.path.join(pythonpath, 'libcrypto.so')
-            if os.path.isfile(crypto_path):
-                libcrypto = ctypes.CDLL(crypto_path, _RTLD_NOW | _RTLD_GLOBAL)
-            else:
-                libcrypto = ctypes.CDLL('libcrypto.so', _RTLD_NOW | _RTLD_GLOBAL)
-        else:
-            libcrypto = ctypes.CDLL('libcrypto.so', _RTLD_NOW | _RTLD_GLOBAL)
-
-        # OPENSSL_init_crypto(uint64_t opts, const void *settings)
-        # opts = 0: use defaults (load default provider)
+        libcrypto = _preload_lib('libcrypto.so', lib_dir)
         opts = ctypes.c_uint64(0)
         settings = ctypes.c_void_p(None)
         init_func = libcrypto.OPENSSL_init_crypto
         init_func.argtypes = [ctypes.c_uint64, ctypes.c_void_p]
         init_func.restype = ctypes.c_int
         result = init_func(opts, settings)
-
         if result == 1:
-            sys.stderr.write('[sitecustomize] OpenSSL init OK\n')
+            sys.stderr.write('[sitecustomize] preload: %d libs + OpenSSL init OK\n' % loaded_libs)
         else:
-            # Try to get error info
             err_func = getattr(libcrypto, 'ERR_get_error', None)
             err_code = err_func() if err_func else 0
-            sys.stderr.write('[sitecustomize] OpenSSL init failed (err=%d)\n' % err_code)
+            sys.stderr.write('[sitecustomize] preload: %d libs, OpenSSL init failed (err=%d)\n' % (loaded_libs, err_code))
     except Exception as e:
-        # Non-fatal — Python can still start, but hashlib may fail
-        sys.stderr.write('[sitecustomize] OpenSSL init error: %s\n' % e)
+        sys.stderr.write('[sitecustomize] preload error: %s\n' % e)
 
 
-_init_openssl()
+_preload_all()
 PYEOF
-        echo "    Injected sitecustomize.py (OpenSSL pre-init for release builds)"
+        echo "    Injected sitecustomize.py (preload + OpenSSL pre-init for release builds)"
 
         # Strip unnecessary content to reduce size
         find "$STDLIB_STAGING" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
