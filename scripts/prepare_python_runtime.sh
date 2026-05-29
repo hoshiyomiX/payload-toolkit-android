@@ -320,7 +320,7 @@ for arch_config in "${ARCH_CONFIGS[@]}"; do
     for lib in libexpat.so; do
         [ -f "$JNI_DIR/$lib" ] && { rm -f "$JNI_DIR/$lib"; REMOVED_UNUSED=$((REMOVED_UNUSED + 1)); }
     done
-    for ext in _elementtree; do
+    for ext in _elementtree pyexpat; do
         find "$JNI_DIR" -maxdepth 1 -name "${ext}*.so" -delete 2>/dev/null && REMOVED_UNUSED=$((REMOVED_UNUSED + 1))
     done
 
@@ -594,7 +594,6 @@ print('1' if strip_rpath('$so_file') else '0')")
         "libpython3.13.so"
         "libz.so"
         "libcrypto.so"
-        "libssl.so"
         "libbz2.so"
         "liblzma.so"
     )
