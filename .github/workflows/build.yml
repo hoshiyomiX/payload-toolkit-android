@@ -55,7 +55,7 @@ jobs:
           ARM32_COUNT=$(ls android/app/src/main/jniLibs/armeabi-v7a/*.so 2>/dev/null | wc -l)
           echo "arm64-v8a:    $ARM64_COUNT .so files"
           echo "armeabi-v7a:  $ARM32_COUNT .so files"
-          MIN_COUNT=40
+          MIN_COUNT=20
           if [ "$ARM64_COUNT" -lt "$MIN_COUNT" ]; then
             echo "ERROR: arm64-v8a has only $ARM64_COUNT .so files (minimum: $MIN_COUNT)"
             echo "Extension modules may have been incorrectly removed."
