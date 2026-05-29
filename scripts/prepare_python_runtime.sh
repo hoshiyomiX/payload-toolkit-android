@@ -650,6 +650,88 @@ print('1' if strip_rpath('$so_file') else '0')")
         # Remove ALL .so files from stdlib (they're in jniLibs now)
         find "$STDLIB_STAGING" -name "*.so" -delete 2>/dev/null || true
 
+        # =================================================================
+        # Inject sitecustomize.py — OpenSSL pre-initialization for release
+        # =================================================================
+        # CRITICAL: In release builds (debuggable=false), Android's bionic
+        # linker SILENTLY IGNORES LD_PRELOAD and LD_LIBRARY_PATH.
+        # This means dependency .so files (libcrypto.so, libssl.so, etc.)
+        # are NOT preloaded in exec mode.  OpenSSL 3.x's default provider
+        # may fail to initialize on some devices when loaded lazily.
+        #
+        # sitecustomize.py is automatically imported by Python's site.py at
+        # startup, BEFORE any user code runs.  We use ctypes.CDLL() to
+        # explicitly load libcrypto.so and call OPENSSL_init_crypto(),
+        # ensuring the default provider is initialized regardless of
+        # LD_PRELOAD, debuggable flag, or linker namespace restrictions.
+        #
+        # ctypes.CDLL(path) uses dlopen() with an ABSOLUTE path, which
+        # works in ALL cases (debug/release, debuggable/non-debuggable)
+        # because nativeLibraryDir is always in the app's linker namespace.
+        #
+        # This runs AFTER pybridge.c's preload in JNI mode (harmless no-op),
+        # and is the ONLY OpenSSL init in exec release mode (critical fix).
+        SITECUSTOMIZE="$STDLIB_STAGING/sitecustomize.py"
+        cat > "$SITECUSTOMIZE" << 'PYEOF'
+# sitecustomize.py — OpenSSL pre-initialization for Android release builds
+# Auto-imported by Python's site.py at startup.
+import os
+import sys
+
+
+def _init_openssl():
+    """Force OpenSSL 3.x default provider initialization via ctypes.
+
+    In Android release builds (debuggable=false), bionic linker ignores
+    LD_PRELOAD.  This means libcrypto.so loads LAZILY when _hashlib.so
+    needs it, and OpenSSL's constructor may not properly initialize the
+    default provider on some devices/linker versions.
+
+    ctypes.CDLL with an absolute path uses dlopen() directly, which works
+    regardless of the debuggable flag because nativeLibraryDir is always
+    in the app's linker namespace.
+    """
+    try:
+        import ctypes
+        import ctypes.util
+
+        # Find libcrypto.so — try PYTHONPATH (nativeLibraryDir) first,
+        # then let the linker search the namespace.
+        pythonpath = os.environ.get('PYTHONPATH', '')
+        if pythonpath:
+            crypto_path = os.path.join(pythonpath, 'libcrypto.so')
+            if os.path.isfile(crypto_path):
+                libcrypto = ctypes.CDLL(crypto_path, ctypes.RTLD_NOW | ctypes.RTLD_GLOBAL)
+            else:
+                libcrypto = ctypes.CDLL('libcrypto.so', ctypes.RTLD_NOW | ctypes.RTLD_GLOBAL)
+        else:
+            libcrypto = ctypes.CDLL('libcrypto.so', ctypes.RTLD_NOW | ctypes.RTLD_GLOBAL)
+
+        # OPENSSL_init_crypto(uint64_t opts, const void *settings)
+        # opts = 0: use defaults (load default provider)
+        opts = ctypes.c_uint64(0)
+        settings = ctypes.c_void_p(None)
+        init_func = libcrypto.OPENSSL_init_crypto
+        init_func.argtypes = [ctypes.c_uint64, ctypes.c_void_p]
+        init_func.restype = ctypes.c_int
+        result = init_func(opts, settings)
+
+        if result == 1:
+            sys.stderr.write('[sitecustomize] OpenSSL init OK\n')
+        else:
+            # Try to get error info
+            err_func = getattr(libcrypto, 'ERR_get_error', None)
+            err_code = err_func() if err_func else 0
+            sys.stderr.write('[sitecustomize] OpenSSL init failed (err=%d)\n' % err_code)
+    except Exception as e:
+        # Non-fatal — Python can still start, but hashlib may fail
+        sys.stderr.write('[sitecustomize] OpenSSL init error: %s\n' % e)
+
+
+_init_openssl()
+PYEOF
+        echo "    Injected sitecustomize.py (OpenSSL pre-init for release builds)"
+
         # Strip unnecessary content to reduce size
         find "$STDLIB_STAGING" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
         find "$STDLIB_STAGING" -type d \( -name "test" -o -name "tests" \) \
