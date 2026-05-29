@@ -693,7 +693,13 @@ def _init_openssl():
     """
     try:
         import ctypes
-        import ctypes.util
+
+        # RTLD constants — ctypes.RTLD_NOW / RTLD_GLOBAL may not exist on
+        # Termux Python builds.  Use Linux numeric values directly:
+        #   RTLD_NOW    = 2  (resolve all symbols at load time)
+        #   RTLD_GLOBAL = 256 (make symbols available to subsequently loaded libs)
+        _RTLD_NOW = getattr(ctypes, 'RTLD_NOW', 2)
+        _RTLD_GLOBAL = getattr(ctypes, 'RTLD_GLOBAL', 256)
 
         # Find libcrypto.so — try PYTHONPATH (nativeLibraryDir) first,
         # then let the linker search the namespace.
@@ -701,11 +707,11 @@ def _init_openssl():
         if pythonpath:
             crypto_path = os.path.join(pythonpath, 'libcrypto.so')
             if os.path.isfile(crypto_path):
-                libcrypto = ctypes.CDLL(crypto_path, ctypes.RTLD_NOW | ctypes.RTLD_GLOBAL)
+                libcrypto = ctypes.CDLL(crypto_path, _RTLD_NOW | _RTLD_GLOBAL)
             else:
-                libcrypto = ctypes.CDLL('libcrypto.so', ctypes.RTLD_NOW | ctypes.RTLD_GLOBAL)
+                libcrypto = ctypes.CDLL('libcrypto.so', _RTLD_NOW | _RTLD_GLOBAL)
         else:
-            libcrypto = ctypes.CDLL('libcrypto.so', ctypes.RTLD_NOW | ctypes.RTLD_GLOBAL)
+            libcrypto = ctypes.CDLL('libcrypto.so', _RTLD_NOW | _RTLD_GLOBAL)
 
         # OPENSSL_init_crypto(uint64_t opts, const void *settings)
         # opts = 0: use defaults (load default provider)
