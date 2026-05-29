@@ -155,12 +155,15 @@ static wchar_t *utf8_to_wcs(const char *utf8)
  *  errors when extension modules have DT_NEEDED for deps whose
  *  DT_SONAME doesn't match the expected name.
  *
- *  Python C extension modules (matching *.cpython-*.so) are
- *  SKIPPED here — they must be loaded by Python's import machinery
- *  via dlopen + PyInit_* symbol lookup.  Pre-loading them can
- *  cause issues on ARM32 where the linker's lazy resolution of
- *  transitive deps (libcrypto.so for _hashlib.so) fails because
- *  of hardcoded RPATH pointing to non-existent Termux paths.
+ *  Python C extension modules (*.cpython-*.so) ARE preloaded here
+ *  so their transitive dependencies (e.g. libcrypto.so for
+ *  _hashlib.so) are resolved into the global symbol scope before
+ *  Python's import machinery loads them.  Without preloading,
+ *  Python's dlopen on ARM32 can fail because the older bionic
+ *  linker cannot resolve DT_NEEDED via PYTHONPATH alone.
+ *
+ *  RPATH/RUNPATH is stripped at build time by prepare_python_runtime.sh
+ *  to prevent the linker from searching non-existent Termux paths.
  *
  *  Uses RTLD_NOW to ensure all symbols are resolved immediately,
  *  catching missing deps early rather than at first use.
@@ -177,7 +180,7 @@ static void preload_native_libs(const char *lib_dir) {
         return;
     }
 
-    int loaded = 0, failed = 0, skipped = 0;
+    int loaded = 0, failed = 0;
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
         const char *name = entry->d_name;
@@ -189,18 +192,6 @@ static void preload_native_libs(const char *lib_dir) {
         if (len < 4) continue;
         if (strstr(name, ".so") == NULL) continue;
         if (strstr(name, "pybridge")) continue;
-
-        /*
-         * Skip Python C extension modules (*.cpython-*-*.so).
-         * These must be loaded by Python's import machinery, not preloaded.
-         * On ARM32, preloading them can cause dlopen failures because
-         * their DT_NEEDED for libcrypto.so etc. gets resolved via
-         * a hardcoded RPATH to a non-existent Termux directory.
-         */
-        if (strstr(name, "cpython-") != NULL) {
-            skipped++;
-            continue;
-        }
 
         char path[1024];
         snprintf(path, sizeof(path), "%s/%s", lib_dir, name);
@@ -220,8 +211,8 @@ static void preload_native_libs(const char *lib_dir) {
         }
     }
     closedir(dir);
-    fprintf(stderr, "[pybridge] preload: %d loaded, %d failed, %d skipped (cpython)\n",
-            loaded, failed, skipped);
+    fprintf(stderr, "[pybridge] preload: %d loaded, %d failed\n",
+            loaded, failed);
 }
 
 /* ═══════════════════════════════════════════════════════════════
