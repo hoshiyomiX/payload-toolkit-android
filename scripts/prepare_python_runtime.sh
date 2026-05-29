@@ -376,6 +376,28 @@ print(fix_needed_all('$so_file', '$JNI_DIR'))")
     done
     echo "    Python patcher: patched $PYTHON_NEEDED DT_NEEDED in $PYTHON_NEEDED_FILES files"
 
+    # Step 3b-2: Strip RPATH/RUNPATH from all .so files.
+    # Termux extension modules embed RPATH pointing to
+    # /data/data/com.termux/files/usr/lib which does not exist on
+    # non-Termux devices.  On older ARM32 bionic linkers, this causes
+    # DT_NEEDED resolution to fail instead of falling back.
+    echo "    Stripping RPATH/RUNPATH (Termux paths)..."
+    PYTHON_RPATH=0
+    for so_file in "$JNI_DIR"/*.so; do
+        [ -f "$so_file" ] || continue
+        FILENAME=$(basename "$so_file")
+        STRIPPED=$(python3 -c "
+import sys; sys.path.insert(0, '$SCRIPT_DIR')
+from validate_elf import strip_rpath
+print('1' if strip_rpath('$so_file') else '0')")
+        STRIPPED=${STRIPPED:-0}
+        if [ "$STRIPPED" -gt 0 ]; then
+            echo "      $FILENAME: RPATH/RUNPATH stripped"
+            PYTHON_RPATH=$((PYTHON_RPATH + 1))
+        fi
+    done
+    echo "    Stripped RPATH/RUNPATH from $PYTHON_RPATH files"
+
     # Step 3c: DT_NEEDED audit
     echo "    Auditing DT_NEEDED for remaining versioned entries..."
     if ! python3 "$SCRIPT_DIR/validate_elf.py" --audit-needed "$JNI_DIR"; then
@@ -542,6 +564,7 @@ print(fix_needed_all('$so_file', '$JNI_DIR'))")
         "libpython3.13.so"
         "libz.so"
         "libcrypto.so"
+        "libssl.so"
         "libbz2.so"
         "liblzma.so"
     )

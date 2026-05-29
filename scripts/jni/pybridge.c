@@ -155,9 +155,15 @@ static wchar_t *utf8_to_wcs(const char *utf8)
  *  errors when extension modules have DT_NEEDED for deps whose
  *  DT_SONAME doesn't match the expected name.
  *
- *  Uses RTLD_LAZY to avoid resolving transitive deps prematurely
- *  (they'll be resolved when actually needed).  Errors are
- *  non-fatal — individual libs failing to load is OK.
+ *  Python C extension modules (matching *.cpython-*.so) are
+ *  SKIPPED here — they must be loaded by Python's import machinery
+ *  via dlopen + PyInit_* symbol lookup.  Pre-loading them can
+ *  cause issues on ARM32 where the linker's lazy resolution of
+ *  transitive deps (libcrypto.so for _hashlib.so) fails because
+ *  of hardcoded RPATH pointing to non-existent Termux paths.
+ *
+ *  Uses RTLD_NOW to ensure all symbols are resolved immediately,
+ *  catching missing deps early rather than at first use.
  * ═══════════════════════════════════════════════════════════════ */
 
 #include <sys/stat.h>
@@ -171,24 +177,41 @@ static void preload_native_libs(const char *lib_dir) {
         return;
     }
 
-    int loaded = 0, failed = 0;
+    int loaded = 0, failed = 0, skipped = 0;
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
         const char *name = entry->d_name;
         size_t len = strlen(name);
         /*
          * Must end with ".so" or ".so.N" (versioned like .so.3, .so.1.0.8)
-         * and not be the bridge itself.  Most Android native libs have
-         * SONAME-style versioned names (libcrypto.so.3, libbz2.so.1.0.8).
+         * and not be the bridge itself.
          */
         if (len < 4) continue;
         if (strstr(name, ".so") == NULL) continue;
         if (strstr(name, "pybridge")) continue;
 
+        /*
+         * Skip Python C extension modules (*.cpython-*-*.so).
+         * These must be loaded by Python's import machinery, not preloaded.
+         * On ARM32, preloading them can cause dlopen failures because
+         * their DT_NEEDED for libcrypto.so etc. gets resolved via
+         * a hardcoded RPATH to a non-existent Termux directory.
+         */
+        if (strstr(name, "cpython-") != NULL) {
+            skipped++;
+            continue;
+        }
+
         char path[1024];
         snprintf(path, sizeof(path), "%s/%s", lib_dir, name);
-        /* RTLD_LAZY: don't resolve transitive deps now */
-        void *h = dlopen(path, RTLD_LAZY | RTLD_GLOBAL);
+        /*
+         * RTLD_NOW: resolve all symbols immediately.
+         * On ARM32, RTLD_LAZY can mask missing dependency errors
+         * until the extension module is actually used by Python,
+         * producing confusing "unsupported hash type" errors instead
+         * of clear "cannot find libcrypto.so" messages.
+         */
+        void *h = dlopen(path, RTLD_NOW | RTLD_GLOBAL);
         if (h) {
             loaded++;
         } else {
@@ -197,7 +220,8 @@ static void preload_native_libs(const char *lib_dir) {
         }
     }
     closedir(dir);
-    fprintf(stderr, "[pybridge] preload: %d loaded, %d failed\n", loaded, failed);
+    fprintf(stderr, "[pybridge] preload: %d loaded, %d failed, %d skipped (cpython)\n",
+            loaded, failed, skipped);
 }
 
 /* ═══════════════════════════════════════════════════════════════

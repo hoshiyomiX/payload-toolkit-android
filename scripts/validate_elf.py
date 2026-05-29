@@ -34,6 +34,8 @@ DT_NEEDED = 1
 DT_STRTAB = 5
 DT_STRSZ = 10
 DT_SONAME = 14
+DT_RPATH = 15
+DT_RUNPATH = 29
 
 
 def _get_elf_class(data):
@@ -384,6 +386,56 @@ def get_dt_needed_list(data):
             except (ValueError, IndexError):
                 pass
     return needed
+
+
+def strip_rpath(path):
+    """Zero out DT_RPATH and DT_RUNPATH entries in .dynamic section.
+
+    Termux extension modules embed a hardcoded RPATH pointing to
+    /data/data/com.termux/files/usr/lib which does not exist on
+    non-Termux devices.  On older ARM32 bionic linkers, this causes
+    DT_NEEDED resolution to fail instead of falling back to the
+    linker's default search path (nativeLibraryDir).
+
+    Returns True if any RPATH/RUNPATH was stripped, False otherwise.
+    """
+    try:
+        with open(path, 'r+b') as f:
+            data = bytearray(f.read())
+    except Exception:
+        return False
+
+    result = _find_dynamic_and_strtab(data)
+    if result is None:
+        return False
+    dynamic_off, dynamic_size, strtab_off, strsz = result
+
+    elf_class = _get_elf_class(data)
+    if elf_class is None:
+        return False
+
+    d_val_fmt = '<Q' if elf_class == ELFCLASS64 else '<I'
+    d_val_off = 8 if elf_class == ELFCLASS64 else 4
+    dyn_entry_size = 16 if elf_class == ELFCLASS64 else 8
+
+    stripped = False
+    pos = dynamic_off
+    end = min(dynamic_off + dynamic_size, len(data))
+    while pos + dyn_entry_size <= end:
+        d_tag = struct.unpack_from('<Q' if elf_class == ELFCLASS64 else '<I', data, pos)[0]
+        if d_tag == DT_NULL:
+            break
+        if d_tag in (DT_RPATH, DT_RUNPATH):
+            # Zero out the d_val field
+            struct.pack_into(d_val_fmt, data, pos + d_val_off, 0)
+            stripped = True
+        pos += dyn_entry_size
+
+    if stripped:
+        with open(path, 'wb') as f:
+            f.write(data)
+
+    return stripped
 
 
 def fix_needed_all(path, jni_dir):
