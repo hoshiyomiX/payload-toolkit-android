@@ -1034,7 +1034,7 @@ class MainActivity : AppCompatActivity() {
             if (customName.lowercase().endsWith(".zip")) customName else "$customName.zip"
         } else if (imageFiles.isNotEmpty()) {
             val device = prefs.getString("device", "")?.trim()
-            PayloadBridge.buildOutputFileName(device)
+            PayloadBridge.buildOutputFileName(device ?: "generic")
         } else {
             "flashable_generic.zip"
         }
@@ -1151,12 +1151,12 @@ class MainActivity : AppCompatActivity() {
 
         // Resolve theme-aware track color (works in both light and dark mode)
         val trackTv = android.util.TypedValue()
-        theme.resolveAttribute(com.google.android.R.attr.colorSurfaceVariant, trackTv, true)
+        theme.resolveAttribute(com.google.android.material.R.attr.colorSurfaceVariant, trackTv, true)
         val trackColor = ContextCompat.getColor(this@MainActivity, trackTv.resourceId)
 
         // Resolve theme-aware indicator color (primary color for active progress)
         val indicatorTv = android.util.TypedValue()
-        theme.resolveAttribute(com.google.android.R.attr.colorPrimary, indicatorTv, true)
+        theme.resolveAttribute(com.google.android.material.R.attr.colorPrimary, indicatorTv, true)
         val indicatorColor = ContextCompat.getColor(this@MainActivity, indicatorTv.resourceId)
 
         for (i in 0 until count) {
@@ -1174,8 +1174,7 @@ class MainActivity : AppCompatActivity() {
                 setTrackColor(trackColor)
                 setIndicatorColor(indicatorColor)
                 // Smooth animated transitions between progress values
-                trackCornerRadius = dpToPx(4).toFloat()
-                indicatorCornerRadius = dpToPx(4).toFloat()
+                trackCornerSize = dpToPx(4).toFloat()
             }
             barRow.addView(bar)
 
