@@ -144,16 +144,17 @@ object PayloadBridge {
     }
 
     /**
-     * Build a smart output filename based on selected partitions and compression.
+     * Build a smart output filename based on device codename.
      *
      * Examples:
-     *   - flashable_dd_odm_dlkm_v16_gzip.zip
-     *   - flashable_boot_vendor_v16_raw.zip
+     *   - flashable_crosshatch.zip
+     *   - flashable_OP11.zip
+     *
+     * Falls back to "flashable_generic.zip" when no device is specified.
      */
-    fun buildOutputFileName(images: Map<String, String>, compression: String, version: Int = 16): String {
-        val partitionNames = images.keys.sorted().joinToString("_")
-        val compressSuffix = if (compression == "none") "raw" else compression
-        return "flashable_dd_${partitionNames}_v${version}_${compressSuffix}.zip"
+    fun buildOutputFileName(device: String = "generic"): String {
+        val safeDevice = device.replace(Regex("[^a-zA-Z0-9_\\-]"), "_").lowercase()
+        return "flashable_${safeDevice}.zip"
     }
 
     // ═══════════════════════════════════════════════════════════════

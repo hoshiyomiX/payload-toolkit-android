@@ -762,7 +762,7 @@ class MainActivity : AppCompatActivity() {
         val outputFileName = if (!customName.isNullOrEmpty()) {
             if (customName.lowercase().endsWith(".zip")) customName else "$customName.zip"
         } else {
-            PayloadBridge.buildOutputFileName(images, selectedCompression)
+            PayloadBridge.buildOutputFileName(deviceValue)
         }
         val outPath = File(outDir, outputFileName).absolutePath
 
@@ -1033,15 +1033,13 @@ class MainActivity : AppCompatActivity() {
             // Ensure .zip extension
             if (customName.lowercase().endsWith(".zip")) customName else "$customName.zip"
         } else if (imageFiles.isNotEmpty()) {
-            val images = imageFiles.toMap()
-            PayloadBridge.buildOutputFileName(images, selectedCompression)
+            val device = prefs.getString("device", "")?.trim()
+            PayloadBridge.buildOutputFileName(device)
         } else {
-            // Show default preview even when no images are added yet
-            val ts = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())
-            "flashable_dd_v1_${ts}_${selectedCompression}.zip"
+            "flashable_generic.zip"
         }
 
-        // Show preview in dedicated italic TextView
+        // Show preview in dedicated TextView
         findViewById<android.widget.TextView>(R.id.textPreviewFilename)?.text = fileName
     }
 
@@ -1151,19 +1149,33 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Resolve theme-aware track color (works in both light and dark mode)
+        val trackTv = android.util.TypedValue()
+        theme.resolveAttribute(com.google.android.R.attr.colorSurfaceVariant, trackTv, true)
+        val trackColor = ContextCompat.getColor(this@MainActivity, trackTv.resourceId)
+
+        // Resolve theme-aware indicator color (primary color for active progress)
+        val indicatorTv = android.util.TypedValue()
+        theme.resolveAttribute(com.google.android.R.attr.colorPrimary, indicatorTv, true)
+        val indicatorColor = ContextCompat.getColor(this@MainActivity, indicatorTv.resourceId)
+
         for (i in 0 until count) {
             val name = names.getOrElse(i) { "" }
             val isLast = (i == count - 1)
             val gap = if (!isLast) dpToPx(4) else 0
 
-            // Progress bar for this partition
+            // Progress bar for this partition — theme-aware colors + animation
             val bar = com.google.android.material.progressindicator.LinearProgressIndicator(this).apply {
                 layoutParams = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     marginEnd = gap
                 }
                 isIndeterminate = false
                 progress = 0
-                trackColor = ContextCompat.getColor(this@MainActivity, R.color.md_theme_light_surfaceVariant)
+                setTrackColor(trackColor)
+                setIndicatorColor(indicatorColor)
+                // Smooth animated transitions between progress values
+                trackCornerRadius = dpToPx(4).toFloat()
+                indicatorCornerRadius = dpToPx(4).toFloat()
             }
             barRow.addView(bar)
 

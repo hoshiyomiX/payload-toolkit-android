@@ -4,24 +4,19 @@
 
     Single-purpose: Build partition images (.img) into flashable OTA ZIP.
 
-    Layout:
+    Layout (split architecture):
     ┌─────────────────────────────────────────┐
     │ TopAppBar (title + version + theme btn) │
     ├─────────────────────────────────────────┤
-    │ Settings Card (single rounded border)   │
-    │   Device                                │
-    │   ─────────                             │
-    │   Add Partitions                        │
-    │   ─────────                             │
-    │   Compression Format                    │
-    │   ─────────                             │
-    │   Compression Level                     │
-    │   ─────────                             │
-    │   Output                                │
+    │ NestedScrollView (weight=1, scrollable) │
+    │   Settings Card                         │
+    │     Device / Partitions / Compression   │
+    │     Level / Output                      │
     ├─────────────────────────────────────────┤
-    │ [BUILD OTA NOW] + ProgressBar           │
+    │   [BUILD OTA NOW] + ProgressBar         │
     ├─────────────────────────────────────────┤
-    │ Log Card (dark terminal)                │
+    │ Log Card (weight=1, independent scroll)│
+    │   Header + Copy/Clear + ScrollView      │
     └─────────────────────────────────────────┘
 -->
 <androidx.coordinatorlayout.widget.CoordinatorLayout
@@ -51,487 +46,503 @@
 
     </com.google.android.material.appbar.AppBarLayout>
 
-    <androidx.core.widget.NestedScrollView
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:fillViewport="true"
+        android:orientation="vertical"
         app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
-        <LinearLayout
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- Top Section: Scrollable Settings                    -->
+        <!-- Weight=1 so it shares space equally with Log Card    -->
+        <!-- ═══════════════════════════════════════════════════ -->
+
+        <androidx.core.widget.NestedScrollView
+            android:id="@+id/scrollViewSettings"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingHorizontal="16dp"
-            android:paddingTop="12dp"
-            android:paddingBottom="16dp">
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:fillViewport="true"
+            android:scrollbars="vertical"
+            android:fadeScrollbars="true"
+            android:scrollbarThumbVertical="@android:color/darker_gray"
+            android:scrollbarSize="4dp">
 
-            <!-- ═══════════════════════════════════════════════════ -->
-            <!-- Unified Settings Card                                -->
-            <!-- Device → Partitions → Compression → Level → Output  -->
-            <!-- ═══════════════════════════════════════════════════ -->
-
-            <com.google.android.material.card.MaterialCardView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="10dp"
-                app:cardCornerRadius="16dp"
-                app:cardElevation="0dp"
-                app:strokeWidth="1dp"
-                app:strokeColor="?attr/colorOutlineVariant">
+                android:orientation="vertical"
+                android:paddingHorizontal="16dp"
+                android:paddingTop="12dp"
+                android:paddingBottom="16dp">
 
-                <LinearLayout
+                <!-- ═══════════════════════════════════════ -->
+                <!-- Unified Settings Card                    -->
+                <!-- ═══════════════════════════════════════ -->
+
+                <com.google.android.material.card.MaterialCardView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
+                    android:layout_marginBottom="10dp"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="0dp"
+                    app:strokeWidth="1dp"
+                    app:strokeColor="?attr/colorOutlineVariant">
 
-                    <!-- ── 1. Device ── -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:layout_marginBottom="4dp">
+                        android:orientation="vertical"
+                        android:padding="16dp">
 
-                        <TextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="@string/label_device"
-                            style="@style/TextAppearance.PayloadToolkit.SectionTitle" />
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/buttonAutoDetect"
-                            style="Widget.Material3.Button.TextButton"
-                            android:layout_width="wrap_content"
-                            android:layout_height="32dp"
-                            android:text="@string/button_auto_detect"
-                            android:textSize="11sp"
-                            android:minWidth="0dp"
-                            android:paddingHorizontal="12dp" />
-
-                    </LinearLayout>
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/description_device"
-                        android:textSize="12sp"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:layout_marginBottom="8dp" />
-
-                    <com.google.android.material.textfield.TextInputLayout
-                        android:id="@+id/layoutDevice"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:hint="@string/hint_device_codename"
-                        app:boxBackgroundColor="?attr/colorSurface"
-                        app:boxCornerRadiusTopStart="12dp"
-                        app:boxCornerRadiusTopEnd="12dp"
-                        app:boxCornerRadiusBottomStart="12dp"
-                        app:boxCornerRadiusBottomEnd="12dp"
-                        app:boxStrokeColor="?attr/colorOutline"
-                        app:helperText="@string/helper_device_codename"
-                        app:helperTextEnabled="true">
-
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/editTextDevice"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:inputType="text"
-                            android:maxLines="1"
-                            android:textSize="14sp" />
-
-                    </com.google.android.material.textfield.TextInputLayout>
-
-                    <!-- Divider -->
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:background="?attr/colorOutlineVariant"
-                        android:layout_marginTop="14dp"
-                        android:layout_marginBottom="14dp" />
-
-                    <!-- ── 2. Add Partitions ── -->
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/label_partitions"
-                        style="@style/TextAppearance.PayloadToolkit.SectionTitle"
-                        android:layout_marginBottom="4dp" />
-
-                    <TextView
-                        android:id="@+id/textEmptyHint"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/hint_add_images_prompt"
-                        android:textSize="13sp"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:layout_marginBottom="10dp"
-                        android:visibility="visible" />
-
-                    <!-- Add Images + Remove All -->
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:layout_marginBottom="10dp">
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/buttonAddImages"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="@string/button_add_images"
-                            style="Widget.Material3.Button.TonalButton"
-                            app:icon="@android:drawable/ic_input_add"
-                            app:iconGravity="textStart" />
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/buttonRemoveAll"
-                            style="Widget.Material3.Button.OutlinedButton"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/button_remove_all"
-                            android:visibility="gone"
-                            android:layout_marginStart="8dp" />
-
-                    </LinearLayout>
-
-                    <!-- Image list container (populated programmatically) -->
-                    <com.google.android.material.card.MaterialCardView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        app:cardCornerRadius="12dp"
-                        app:cardElevation="0dp"
-                        app:strokeWidth="1dp"
-                        app:strokeColor="?attr/colorOutlineVariant"
-                        app:cardBackgroundColor="?attr/colorSurfaceContainerLowest">
-
+                        <!-- ── 1. Device ── -->
                         <LinearLayout
-                            android:id="@+id/containerImageList"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:orientation="vertical"
-                            android:padding="8dp"
-                            android:minHeight="48dp" />
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="4dp">
 
-                    </com.google.android.material.card.MaterialCardView>
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/label_device"
+                                style="@style/TextAppearance.PayloadToolkit.SectionTitle" />
 
-                    <!-- Divider -->
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:background="?attr/colorOutlineVariant"
-                        android:layout_marginTop="14dp"
-                        android:layout_marginBottom="14dp" />
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/buttonAutoDetect"
+                                style="Widget.Material3.Button.TextButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="32dp"
+                                android:text="@string/button_auto_detect"
+                                android:textSize="11sp"
+                                android:minWidth="0dp"
+                                android:paddingHorizontal="12dp" />
 
-                    <!-- ── 3. Compression Format ── -->
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/label_compression"
-                        style="@style/TextAppearance.PayloadToolkit.SectionTitle"
-                        android:layout_marginBottom="4dp" />
+                        </LinearLayout>
 
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/description_compression"
-                        android:textSize="12sp"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:layout_marginBottom="8dp" />
-
-                    <androidx.appcompat.widget.AppCompatSpinner
-                        android:id="@+id/spinnerCompression"
-                        android:layout_width="match_parent"
-                        android:layout_height="48dp"
-                        android:background="?attr/selectableItemBackground"
-                        android:spinnerMode="dropdown"
-                        android:paddingStart="4dp"
-                        android:paddingEnd="8dp" />
-
-                    <!-- Divider -->
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:background="?attr/colorOutlineVariant"
-                        android:layout_marginTop="14dp"
-                        android:layout_marginBottom="14dp" />
-
-                    <!-- ── 4. Compression Level ── -->
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/label_compression_level"
-                        style="@style/TextAppearance.PayloadToolkit.SectionTitle"
-                        android:layout_marginBottom="4dp" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/description_compression_level"
-                        android:textSize="12sp"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:layout_marginBottom="8dp" />
-
-                    <androidx.appcompat.widget.AppCompatSpinner
-                        android:id="@+id/spinnerCompressionLevel"
-                        android:layout_width="match_parent"
-                        android:layout_height="48dp"
-                        android:background="?attr/selectableItemBackground"
-                        android:spinnerMode="dropdown"
-                        android:paddingStart="4dp"
-                        android:paddingEnd="8dp" />
-
-                    <!-- Divider -->
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:background="?attr/colorOutlineVariant"
-                        android:layout_marginTop="14dp"
-                        android:layout_marginBottom="14dp" />
-
-                    <!-- ── 5. Output ── -->
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/label_output"
-                        style="@style/TextAppearance.PayloadToolkit.SectionTitle"
-                        android:layout_marginBottom="6dp" />
-
-                    <!-- Custom filename input -->
-                    <com.google.android.material.textfield.TextInputLayout
-                        android:id="@+id/layoutCustomFilename"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginBottom="6dp"
-                        android:hint="@string/hint_custom_filename"
-                        app:boxBackgroundColor="?attr/colorSurface"
-                        app:boxCornerRadiusTopStart="12dp"
-                        app:boxCornerRadiusTopEnd="12dp"
-                        app:boxCornerRadiusBottomStart="12dp"
-                        app:boxCornerRadiusBottomEnd="12dp"
-                        app:boxStrokeColor="?attr/colorOutline"
-                        app:helperText="@string/helper_custom_filename"
-                        app:helperTextEnabled="true"
-                        app:counterEnabled="true"
-                        app:counterMaxLength="128">
-
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/editTextCustomFilename"
+                        <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:inputType="text"
-                            android:maxLines="1"
-                            android:textSize="14sp"
-                            android:maxLength="128" />
-
-                    </com.google.android.material.textfield.TextInputLayout>
-
-                    <!-- Output filename preview -->
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:layout_marginBottom="6dp"
-                        android:paddingStart="4dp">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/label_preview"
+                            android:text="@string/description_device"
                             android:textSize="12sp"
                             android:textColor="?attr/colorOnSurfaceVariant"
-                            android:textStyle="italic"
-                            android:layout_marginEnd="6dp" />
-
-                        <TextView
-                            android:id="@+id/textPreviewFilename"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:textSize="12sp"
-                            android:textColor="?attr/colorOnSurfaceVariant"
-                            android:textStyle="italic"
-                            android:maxLines="2"
-                            android:ellipsize="middle"
-                            android:fontFamily="monospace" />
-
-                    </LinearLayout>
-
-                    <!-- Output directory + Browse -->
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
+                            android:layout_marginBottom="8dp" />
 
                         <com.google.android.material.textfield.TextInputLayout
-                            android:layout_width="0dp"
+                            android:id="@+id/layoutDevice"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:layout_marginEnd="8dp"
+                            android:hint="@string/hint_device_codename"
                             app:boxBackgroundColor="?attr/colorSurface"
                             app:boxCornerRadiusTopStart="12dp"
                             app:boxCornerRadiusTopEnd="12dp"
                             app:boxCornerRadiusBottomStart="12dp"
                             app:boxCornerRadiusBottomEnd="12dp"
-                            app:boxStrokeColor="?attr/colorOutline">
+                            app:boxStrokeColor="?attr/colorOutline"
+                            app:helperText="@string/helper_device_codename"
+                            app:helperTextEnabled="true">
 
                             <com.google.android.material.textfield.TextInputEditText
-                                android:id="@+id/editTextOutput"
+                                android:id="@+id/editTextDevice"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:hint="@string/hint_output_dir"
-                                android:inputType="none"
-                                android:focusable="false"
-                                android:clickable="false"
-                                android:maxLines="2"
-                                android:ellipsize="middle"
+                                android:inputType="text"
+                                android:maxLines="1"
                                 android:textSize="14sp" />
 
                         </com.google.android.material.textfield.TextInputLayout>
 
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/buttonBrowseOutput"
-                            style="Widget.Material3.Button.OutlinedButton"
+                        <!-- Divider -->
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:background="?attr/colorOutlineVariant"
+                            android:layout_marginTop="14dp"
+                            android:layout_marginBottom="14dp" />
+
+                        <!-- ── 2. Add Partitions ── -->
+                        <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="@string/button_browse"
-                            android:minWidth="80dp" />
+                            android:text="@string/label_partitions"
+                            style="@style/TextAppearance.PayloadToolkit.SectionTitle"
+                            android:layout_marginBottom="4dp" />
+
+                        <TextView
+                            android:id="@+id/textEmptyHint"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/hint_add_images_prompt"
+                            android:textSize="13sp"
+                            android:textColor="?attr/colorOnSurfaceVariant"
+                            android:layout_marginBottom="10dp"
+                            android:visibility="visible" />
+
+                        <!-- Add Images + Remove All -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="10dp">
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/buttonAddImages"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/button_add_images"
+                                style="Widget.Material3.Button.TonalButton"
+                                app:icon="@android:drawable/ic_input_add"
+                                app:iconGravity="textStart" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/buttonRemoveAll"
+                                style="Widget.Material3.Button.OutlinedButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/button_remove_all"
+                                android:visibility="gone"
+                                android:layout_marginStart="8dp" />
+
+                        </LinearLayout>
+
+                        <!-- Image list container (populated programmatically) -->
+                        <com.google.android.material.card.MaterialCardView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            app:cardCornerRadius="12dp"
+                            app:cardElevation="0dp"
+                            app:strokeWidth="1dp"
+                            app:strokeColor="?attr/colorOutlineVariant"
+                            app:cardBackgroundColor="?attr/colorSurfaceContainerLowest">
+
+                            <LinearLayout
+                                android:id="@+id/containerImageList"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:padding="8dp"
+                                android:minHeight="48dp" />
+
+                        </com.google.android.material.card.MaterialCardView>
+
+                        <!-- Divider -->
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:background="?attr/colorOutlineVariant"
+                            android:layout_marginTop="14dp"
+                            android:layout_marginBottom="14dp" />
+
+                        <!-- ── 3. Compression Format ── -->
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/label_compression"
+                            style="@style/TextAppearance.PayloadToolkit.SectionTitle"
+                            android:layout_marginBottom="4dp" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/description_compression"
+                            android:textSize="12sp"
+                            android:textColor="?attr/colorOnSurfaceVariant"
+                            android:layout_marginBottom="8dp" />
+
+                        <androidx.appcompat.widget.AppCompatSpinner
+                            android:id="@+id/spinnerCompression"
+                            android:layout_width="match_parent"
+                            android:layout_height="48dp"
+                            android:background="?attr/selectableItemBackground"
+                            android:spinnerMode="dropdown"
+                            android:paddingStart="4dp"
+                            android:paddingEnd="8dp" />
+
+                        <!-- Divider -->
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:background="?attr/colorOutlineVariant"
+                            android:layout_marginTop="14dp"
+                            android:layout_marginBottom="14dp" />
+
+                        <!-- ── 4. Compression Level ── -->
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/label_compression_level"
+                            style="@style/TextAppearance.PayloadToolkit.SectionTitle"
+                            android:layout_marginBottom="4dp" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/description_compression_level"
+                            android:textSize="12sp"
+                            android:textColor="?attr/colorOnSurfaceVariant"
+                            android:layout_marginBottom="8dp" />
+
+                        <androidx.appcompat.widget.AppCompatSpinner
+                            android:id="@+id/spinnerCompressionLevel"
+                            android:layout_width="match_parent"
+                            android:layout_height="48dp"
+                            android:background="?attr/selectableItemBackground"
+                            android:spinnerMode="dropdown"
+                            android:paddingStart="4dp"
+                            android:paddingEnd="8dp" />
+
+                        <!-- Divider -->
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:background="?attr/colorOutlineVariant"
+                            android:layout_marginTop="14dp"
+                            android:layout_marginBottom="14dp" />
+
+                        <!-- ── 5. Output ── -->
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/label_output"
+                            style="@style/TextAppearance.PayloadToolkit.SectionTitle"
+                            android:layout_marginBottom="6dp" />
+
+                        <!-- Custom filename input -->
+                        <com.google.android.material.textfield.TextInputLayout
+                            android:id="@+id/layoutCustomFilename"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="6dp"
+                            android:hint="@string/hint_custom_filename"
+                            app:boxBackgroundColor="?attr/colorSurface"
+                            app:boxCornerRadiusTopStart="12dp"
+                            app:boxCornerRadiusTopEnd="12dp"
+                            app:boxCornerRadiusBottomStart="12dp"
+                            app:boxCornerRadiusBottomEnd="12dp"
+                            app:boxStrokeColor="?attr/colorOutline"
+                            app:helperText="@string/helper_custom_filename"
+                            app:helperTextEnabled="true"
+                            app:counterEnabled="true"
+                            app:counterMaxLength="128">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/editTextCustomFilename"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:inputType="text"
+                                android:maxLines="1"
+                                android:textSize="14sp"
+                                android:maxLength="128" />
+
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <!-- Output filename preview — NO italic -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="6dp"
+                            android:paddingStart="4dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/label_preview"
+                                android:textSize="12sp"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:layout_marginEnd="6dp" />
+
+                            <TextView
+                                android:id="@+id/textPreviewFilename"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:textSize="12sp"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:maxLines="2"
+                                android:ellipsize="middle"
+                                android:fontFamily="monospace" />
+
+                        </LinearLayout>
+
+                        <!-- Output directory + Browse -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical">
+
+                            <com.google.android.material.textfield.TextInputLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:layout_marginEnd="8dp"
+                                app:boxBackgroundColor="?attr/colorSurface"
+                                app:boxCornerRadiusTopStart="12dp"
+                                app:boxCornerRadiusTopEnd="12dp"
+                                app:boxCornerRadiusBottomStart="12dp"
+                                app:boxCornerRadiusBottomEnd="12dp"
+                                app:boxStrokeColor="?attr/colorOutline">
+
+                                <com.google.android.material.textfield.TextInputEditText
+                                    android:id="@+id/editTextOutput"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:hint="@string/hint_output_dir"
+                                    android:inputType="none"
+                                    android:focusable="false"
+                                    android:clickable="false"
+                                    android:maxLines="2"
+                                    android:ellipsize="middle"
+                                    android:textSize="14sp" />
+
+                            </com.google.android.material.textfield.TextInputLayout>
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/buttonBrowseOutput"
+                                style="Widget.Material3.Button.OutlinedButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/button_browse"
+                                android:minWidth="80dp" />
+
+                        </LinearLayout>
 
                     </LinearLayout>
 
-                </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
 
-            </com.google.android.material.card.MaterialCardView>
+                <!-- ═══════════════════════════════════════════════════ -->
+                <!-- Build Button + Progress Bar                           -->
+                <!-- ═══════════════════════════════════════════════════ -->
 
-            <!-- ═══════════════════════════════════════════════════ -->
-            <!-- Build Button + Progress Bar                           -->
-            <!-- ═══════════════════════════════════════════════════ -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonExecute"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:text="@string/button_repack"
+                    android:textSize="15sp"
+                    android:layout_marginTop="2dp"
+                    android:layout_marginBottom="8dp"
+                    app:cornerRadius="14dp"
+                    app:icon="@android:drawable/ic_media_play"
+                    app:iconGravity="textStart" />
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/buttonExecute"
-                android:layout_width="match_parent"
-                android:layout_height="52dp"
-                android:text="@string/button_repack"
-                android:textSize="15sp"
-                android:layout_marginTop="2dp"
-                android:layout_marginBottom="8dp"
-                app:cornerRadius="14dp"
-                app:icon="@android:drawable/ic_media_play"
-                app:iconGravity="textStart" />
+                <!-- Per-partition progress bars + labels (built programmatically) -->
+                <LinearLayout
+                    android:id="@+id/progressBarContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone"
+                    android:layout_marginBottom="10dp" />
 
-            <!-- Per-partition progress bars + labels (built programmatically) -->
+            </LinearLayout>
+
+        </androidx.core.widget.NestedScrollView>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- Bottom Section: Log Card (independent scroll)       -->
+        <!-- Weight=1 so it shares space equally with settings  -->
+        <!-- ═══════════════════════════════════════════════════ -->
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="?attr/colorOutlineVariant"
+            app:cardBackgroundColor="@color/log_background">
+
             <LinearLayout
-                android:id="@+id/progressBarContainer"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:visibility="gone"
-                android:layout_marginBottom="10dp" />
-
-            <!-- ═══════════════════════════════════════════════════ -->
-            <!-- Log Output (terminal-style)                         -->
-            <!-- ═══════════════════════════════════════════════════ -->
-
-            <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                app:cardCornerRadius="16dp"
-                app:cardElevation="0dp"
-                app:strokeWidth="1dp"
-                app:strokeColor="?attr/colorOutlineVariant"
-                app:cardBackgroundColor="@color/log_background">
+                android:orientation="vertical">
 
+                <!-- Log header bar -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical">
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingHorizontal="12dp"
+                    android:paddingVertical="10dp">
 
-                    <!-- Log header bar -->
-                    <LinearLayout
-                        android:layout_width="match_parent"
+                    <TextView
+                        android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:paddingHorizontal="12dp"
-                        android:paddingVertical="10dp">
+                        android:layout_weight="1"
+                        android:text="@string/label_output_log"
+                        android:textSize="12sp"
+                        android:textAllCaps="true"
+                        android:letterSpacing="0.08"
+                        android:textColor="@color/log_info" />
 
-                        <TextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="@string/label_output_log"
-                            android:textSize="12sp"
-                            android:textAllCaps="true"
-                            android:letterSpacing="0.08"
-                            android:textColor="@color/log_info" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/buttonCopyLog"
+                        style="Widget.Material3.Button.TextButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="32dp"
+                        android:text="@string/button_copy_log"
+                        android:textSize="12sp"
+                        android:minWidth="0dp"
+                        android:paddingHorizontal="12dp" />
 
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/buttonCopyLog"
-                            style="Widget.Material3.Button.TextButton"
-                            android:layout_width="wrap_content"
-                            android:layout_height="32dp"
-                            android:text="@string/button_copy_log"
-                            android:textSize="12sp"
-                            android:minWidth="0dp"
-                            android:paddingHorizontal="12dp" />
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/buttonClearLog"
-                            style="Widget.Material3.Button.TextButton"
-                            android:layout_width="wrap_content"
-                            android:layout_height="32dp"
-                            android:text="@string/button_clear_log"
-                            android:textSize="12sp"
-                            android:minWidth="0dp"
-                            android:layout_marginStart="8dp"
-                            android:paddingHorizontal="12dp" />
-
-                    </LinearLayout>
-
-                    <!-- Log divider -->
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:background="@color/log_divider" />
-
-                    <!-- Scrollable log -->
-                    <ScrollView
-                        android:id="@+id/scrollViewLog"
-                        android:layout_width="match_parent"
-                        android:layout_height="300dp"
-                        android:fillViewport="true"
-                        android:nestedScrollingEnabled="false"
-                        android:scrollbars="vertical"
-                        android:fadeScrollbars="true"
-                        android:scrollbarThumbVertical="@android:color/darker_gray"
-                        android:scrollbarSize="4dp">
-
-                        <TextView
-                            android:id="@+id/textViewLog"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:padding="12dp"
-                            android:textColor="@color/log_text"
-                            android:fontFamily="monospace"
-                            android:textSize="11sp"
-                            android:lineSpacingMultiplier="1.3"
-                            android:typeface="monospace"
-                            android:textIsSelectable="true" />
-
-                    </ScrollView>
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/buttonClearLog"
+                        style="Widget.Material3.Button.TextButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="32dp"
+                        android:text="@string/button_clear_log"
+                        android:textSize="12sp"
+                        android:minWidth="0dp"
+                        android:layout_marginStart="8dp"
+                        android:paddingHorizontal="12dp" />
 
                 </LinearLayout>
 
-            </com.google.android.material.card.MaterialCardView>
+                <!-- Log divider -->
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/log_divider" />
 
-        </LinearLayout>
+                <!-- Scrollable log — independent from main settings scroll -->
+                <ScrollView
+                    android:id="@+id/scrollViewLog"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:fillViewport="true"
+                    android:scrollbars="vertical"
+                    android:fadeScrollbars="true"
+                    android:scrollbarThumbVertical="@android:color/darker_gray"
+                    android:scrollbarSize="4dp">
 
-    </androidx.core.widget.NestedScrollView>
+                    <TextView
+                        android:id="@+id/textViewLog"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:padding="12dp"
+                        android:textColor="@color/log_text"
+                        android:fontFamily="monospace"
+                        android:textSize="11sp"
+                        android:lineSpacingMultiplier="1.3"
+                        android:typeface="monospace"
+                        android:textIsSelectable="true" />
+
+                </ScrollView>
+
+            </LinearLayout>
+
+        </com.google.android.material.card.MaterialCardView>
+
+    </LinearLayout>
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

@@ -5,7 +5,7 @@
     <item
         android:id="@+id/action_toggle_theme"
         android:title="@string/theme_label"
-        android:icon="@drawable/ic_theme_light"
+        android:icon="@drawable/ic_theme_auto"
         android:contentDescription="@string/theme_label"
         app:showAsAction="always"
         app:tint="?attr/colorOnSurfaceVariant" />
