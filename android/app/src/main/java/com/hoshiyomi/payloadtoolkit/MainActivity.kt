@@ -1173,8 +1173,6 @@ class MainActivity : AppCompatActivity() {
                 progress = 0
                 setTrackColor(trackColor)
                 setIndicatorColor(indicatorColor)
-                // Smooth animated transitions between progress values
-                trackCornerSize = dpToPx(4).toFloat()
             }
             barRow.addView(bar)
 
